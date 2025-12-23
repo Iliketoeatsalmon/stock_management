@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  postgres:
+    # Use Amazon ECR Public mirror to avoid Docker Hub auth outages
+    image: public.ecr.aws/docker/library/postgres:15-alpine
+    container_name: stock_db
+    environment:
+      POSTGRES_USER: stockadmin
+      POSTGRES_PASSWORD: stockpass123
+      POSTGRES_DB: stock_management
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockadmin -d stock_management"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: stock_api
+    environment:
+      DATABASE_URL: postgresql://stockadmin:stockpass123@postgres:5432/stock_management
+      SECRET_KEY: your-super-secret-key-change-in-production
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./uploads:/app/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: stock_web
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_BASE_PATH: /stock
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

@@ -1,0 +1,69 @@
+# ---- Node / Next.js (root + frontend) ----
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+# ถ้าใช้ pnpm ให้ keep pnpm-lock.yaml
+# pnpm-lock.yaml
+
+# Next.js build artifacts / standalone exports
+*.next
+.next/
+frontend/.next/
+frontend/standalone/
+frontend/stock_run_build/
+frontend/stock-standalone*.zip
+frontend/stock-standalone-runtime*.zip
+
+# Static exports / output folders (ถ้ามี)
+out/
+frontend/out/
+
+# ---- Python / FastAPI backend ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pdb
+*.egg-info/
+.eggs/
+.env
+.venv/
+venv/
+env/
+
+# Backend uploads (ไฟล์จริงจากระบบ ไม่ควรเก็บใน Git)
+backend/uploads/
+
+# ถ้ามี log จาก backend
+*.log
+
+# ---- Docker / Compose ----
+docker-compose.override.yml
+.docker/
+*.pid
+
+# ---- OS / Editor junk ----
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# VSCode / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ---- Misc build / cache ----
+dist/
+build/
+.cache/
+.temp/
+tmp/
