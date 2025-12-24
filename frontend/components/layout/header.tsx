@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Bell, User, LogOut } from "lucide-react"
+import { Bell, Menu, User, LogOut } from "lucide-react"
 import { useRouter } from "next/navigation"
 
 interface UserData {
@@ -27,11 +27,21 @@ export function Header({ title }: { title: string }) {
   }
 
   return (
-    <header className="bg-white border-b border-gray-200 px-6 py-4 print:hidden">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-gray-800">{title}</h2>
+    <header className="bg-white border-b border-gray-200 px-4 py-3 sm:px-6 sm:py-4 print:hidden">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new Event("sidebar:open"))}
+            className="md:hidden p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+            aria-label="Open menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <h2 className="text-xl font-semibold text-gray-800 truncate">{title}</h2>
+        </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 flex-wrap justify-end">
           <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
             <Bell className="w-5 h-5" />
           </button>
@@ -41,14 +51,14 @@ export function Header({ title }: { title: string }) {
             className="flex items-center gap-2 px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
           >
             <LogOut className="w-4 h-4" />
-            ออกจากระบบ
+            <span className="hidden sm:inline">Е,-Е,-Е,?Е,^Е,¤Е,?Е,ЬЕ,°Е,sЕ,s</span>
           </button>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <div className="w-9 h-9 bg-blue-600 rounded-full flex items-center justify-center">
               <User className="w-5 h-5 text-white" />
             </div>
-            <div>
+            <div className="hidden sm:block">
               <p className="text-sm font-medium text-gray-700">{user?.full_name || "User"}</p>
               <p className="text-xs text-gray-500 capitalize">{user?.role || "staff"}</p>
             </div>

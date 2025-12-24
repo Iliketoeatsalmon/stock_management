@@ -16,6 +16,9 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_API_URL:
       process.env.NEXT_PUBLIC_API_URL || "https://api-stock.cleanovaworld.com",
+    // Ensure NEXT_PUBLIC_API_BASE_URL is available and falls back to a relative "/api"
+    NEXT_PUBLIC_API_BASE_URL:
+      process.env.NEXT_PUBLIC_API_BASE_URL || (process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/api` : "/api"),
     NEXT_PUBLIC_BASE_PATH: "/stock",
   },
 

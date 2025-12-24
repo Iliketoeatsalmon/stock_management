@@ -1,4 +1,5 @@
 import type React from "react"
+import InitClient from "../components/init-client"
 import "./globals.css"
 import type { Metadata } from "next"
 
@@ -14,7 +15,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="th">
-      <body className="text-black">{children}</body>
+      <body className="text-black">
+        {/* client initializer: normalize localStorage stored URLs (logo/images) */}
+        {/* kept minimal — runs once on first client mount */}
+        <InitClient />
+        {children}
+      </body>
     </html>
   )
 }

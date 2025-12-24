@@ -5,7 +5,7 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
-import { api, API_URL } from "@/lib/api"
+import { api, API_URL, resolveUploadUrl } from "@/lib/api"
 import { Plus, Users, Shield, User } from "lucide-react"
 import { loadCompanySettings, saveCompanySettings } from "@/lib/company"
 
@@ -40,7 +40,7 @@ export default function UsersPage() {
 
   const loadUsers = async () => {
     try {
-      const result = await api.get("/api/users")
+      const result = await api.get("/users")
       setUsers(result)
     } catch (err) {
       console.error("Failed to load users:", err)
@@ -52,7 +52,7 @@ export default function UsersPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await api.post("/api/users", form)
+      await api.post("/users", form)
       setShowModal(false)
       setForm({ username: "", email: "", password: "", full_name: "", role: "staff" })
       loadUsers()
@@ -138,7 +138,7 @@ export default function UsersPage() {
                         onClick={async () => {
                           if (!confirm(`ลบผู้ใช้ ${user.username}?`)) return
                           try {
-                            await api.delete(`/api/users/${user.id}`)
+                            await api.delete(`/users/${user.id}`)
                             loadUsers()
                           } catch (err) {
                             alert("ลบผู้ใช้ไม่สำเร็จ")
@@ -241,8 +241,8 @@ export default function UsersPage() {
                   if (logoFile) {
                     const fd = new FormData()
                     fd.append("file", logoFile)
-                    const res = await api.upload("/api/upload-image", fd)
-                    logoUrl = res.url.startsWith("http") ? res.url : `${API_URL}${res.url}`
+                    const res = await api.upload("/upload-image", fd)
+                    logoUrl = resolveUploadUrl(res.url)
                   }
                   saveCompanySettings({ ...companyForm, logo: logoUrl })
                   setShowCompany(false)

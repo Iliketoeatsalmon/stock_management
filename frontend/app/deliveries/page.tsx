@@ -28,7 +28,7 @@ export default function DeliveriesPage() {
 
   const loadDeliveries = async () => {
     try {
-      const result = await api.get("/api/deliveries")
+      const result = await api.get("/deliveries")
       setDeliveries(result)
     } catch (err) {
       console.error("Failed to load deliveries:", err)
@@ -68,7 +68,7 @@ export default function DeliveriesPage() {
             </Link>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>

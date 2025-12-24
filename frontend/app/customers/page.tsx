@@ -32,7 +32,7 @@ export default function CustomersPage() {
 
   const loadCustomers = async () => {
     try {
-      const result = await api.get("/api/customers")
+      const result = await api.get("/customers")
       setCustomers(result)
     } catch (err) {
       console.error("Failed to load customers:", err)
@@ -44,12 +44,13 @@ export default function CustomersPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await api.post("/api/customers", form)
+      await api.post("/customers", form)
       setShowModal(false)
       setForm({ name: "", contact_person: "", phone: "", email: "", address: "", tax_id: "" })
       loadCustomers()
     } catch (err) {
-      alert("เกิดข้อผิดพลาด")
+      const message = err && typeof err === "object" && "message" in err ? (err as any).message : String(err)
+      alert(message || "เกิดข้อผิดพลาด")
     }
   }
 
@@ -71,7 +72,7 @@ export default function CustomersPage() {
             </button>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
@@ -124,8 +125,8 @@ export default function CustomersPage() {
                           <button
                             onClick={async () => {
                               if (!confirm(`ลบลูกค้า ${customer.name}?`)) return
-                              try {
-                                await api.delete(`/api/customers/${customer.id}`)
+                                      try {
+                                            await api.delete(`/customers/${customer.id}`)
                                 loadCustomers()
                               } catch (err) {
                                 alert("ลบไม่สำเร็จ")
@@ -232,7 +233,7 @@ export default function CustomersPage() {
               onSubmit={async (e) => {
                 e.preventDefault()
                 try {
-                  await api.put(`/api/customers/${editing.id}`, editForm)
+                  await api.put(`/customers/${editing.id}`, editForm)
                   setEditing(null)
                   loadCustomers()
                 } catch (err) {

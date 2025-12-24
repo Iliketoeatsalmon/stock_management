@@ -40,7 +40,7 @@ export default function PurchaseReportPage() {
 
   const loadSuppliers = async () => {
     try {
-      const result = await api.get("/api/suppliers")
+      const result = await api.get("/suppliers")
       setSuppliers(result)
     } catch (err) {
       console.error("Failed to load suppliers:", err)
@@ -166,7 +166,7 @@ export default function PurchaseReportPage() {
                   รวมทั้งสิ้น: {purchaseData.total_amount?.toLocaleString(undefined, { maximumFractionDigits: 2 })} บาท
                 </div>
               </div>
-              <div className="overflow-hidden border border-gray-200 rounded-lg">
+              <div className="overflow-x-auto border border-gray-200 rounded-lg">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-100">
                     <tr>

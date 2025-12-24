@@ -94,7 +94,7 @@ export default function DeliveryDetailPage() {
 
   const loadProducts = async () => {
     try {
-      const res = await api.get("/api/products")
+      const res = await api.get("/products")
       setProducts(res)
     } catch (err) {
       console.error("load products failed", err)

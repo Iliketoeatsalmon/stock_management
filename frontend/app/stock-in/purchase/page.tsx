@@ -6,7 +6,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
-import { api, API_URL } from "@/lib/api"
+import { api, API_URL, resolveUploadUrl } from "@/lib/api"
 import { ArrowLeft, Plus, Trash2, Save, Upload, X } from "lucide-react"
 import Link from "next/link"
 import { DatePicker } from "@/components/ui/date-picker"
@@ -52,7 +52,7 @@ export default function PurchasePage() {
 
   const loadData = async () => {
     try {
-      const [suppliersData, productsData] = await Promise.all([api.get("/api/suppliers"), api.get("/api/products")])
+      const [suppliersData, productsData] = await Promise.all([api.get("/suppliers"), api.get("/products")])
       setSuppliers(suppliersData)
       setProducts(productsData)
     } catch (err) {
@@ -92,14 +92,14 @@ export default function PurchasePage() {
           if (att.file) {
             const fd = new FormData()
             fd.append("file", att.file)
-            const uploadRes = await api.upload("/api/upload-image", fd)
-            urls.push(uploadRes.url.startsWith("http") ? uploadRes.url : `${API_URL}${uploadRes.url}`)
+            const uploadRes = await api.upload("/upload-image", fd)
+            urls.push(resolveUploadUrl(uploadRes.url))
           }
         }
         attachmentUrl = JSON.stringify(urls)
       }
 
-      await api.post("/api/purchases", { ...form, attachment_url: attachmentUrl, items })
+      await api.post("/purchases", { ...form, attachment_url: attachmentUrl, items })
       router.push("/dashboard")
     } catch (err: any) {
       setError(err.message || "เกิดข้อผิดพลาด")
@@ -330,11 +330,11 @@ export default function PurchasePage() {
                   if (productImageFile) {
                     const fd = new FormData()
                     fd.append("file", productImageFile)
-                    const res = await api.upload("/api/upload-image", fd)
-                    imageUrl = res.url.startsWith("http") ? res.url : `${API_URL}${res.url}`
+                    const res = await api.upload("/upload-image", fd)
+                    imageUrl = resolveUploadUrl(res.url)
                   }
-                  await api.post("/api/products", { ...productForm, image_url: imageUrl })
-                  const productsData = await api.get("/api/products")
+                  await api.post("/products", { ...productForm, image_url: imageUrl })
+                  const productsData = await api.get("/products")
                   setProducts(productsData)
                   setShowProductModal(false)
                   setProductForm({ code: "", name: "", unit: "ชิ้น", min_stock: 0, description: "", image_url: "" })

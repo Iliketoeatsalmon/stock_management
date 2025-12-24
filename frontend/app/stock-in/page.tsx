@@ -48,7 +48,7 @@ export default function StockInPage() {
   const loadHistory = async () => {
     setLoading(true)
     try {
-      const res = await api.get("/api/purchases")
+      const res = await api.get("/purchases")
       setHistory(res)
     } catch (err) {
       console.error("Failed to load purchases:", err)
@@ -187,7 +187,7 @@ export default function StockInPage() {
             {loadingDetail ? (
               <p className="text-center text-gray-500">กำลังโหลด...</p>
             ) : (
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <div className="border border-gray-200 rounded-lg overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>

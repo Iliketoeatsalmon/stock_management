@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { useParams } from "next/navigation"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
-import { api } from "@/lib/api"
+import { api, resolveUploadUrl } from "@/lib/api"
 import { ArrowLeft, ArrowDownToLine, ArrowUpFromLine } from "lucide-react"
 import Link from "next/link"
 import { format } from "date-fns"
@@ -75,7 +75,7 @@ export default function ProductDetailPage() {
               <div className="flex items-start gap-4">
                 {data.product.image_url ? (
                   <img
-                    src={data.product.image_url}
+                    src={resolveUploadUrl(data.product.image_url)}
                     alt={data.product.name}
                     className="w-28 h-28 rounded-lg border border-gray-200 object-cover"
                   />
@@ -103,7 +103,7 @@ export default function ProductDetailPage() {
           </div>
 
           {/* Movements Table */}
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
             <div className="p-4 border-b border-gray-200">
               <h3 className="font-semibold text-gray-900">ประวัติการเคลื่อนไหว (Stock Card)</h3>
             </div>

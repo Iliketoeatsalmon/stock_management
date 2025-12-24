@@ -26,7 +26,7 @@ export default function DashboardPage() {
 
   const loadDashboard = async () => {
     try {
-      const result = await api.get("/api/dashboard")
+      const result = await api.get("/dashboard")
       setData(result)
     } catch (err) {
       console.error("Failed to load dashboard:", err)

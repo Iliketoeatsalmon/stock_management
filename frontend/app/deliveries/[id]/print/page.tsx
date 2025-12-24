@@ -28,7 +28,7 @@ export default function DeliveryPrintPage() {
     const load = async () => {
       try {
         const token = typeof window !== "undefined" ? localStorage.getItem("token") : null
-        const res = await fetch(`${API_URL}/api/deliveries/${params.id}`, {
+        const res = await fetch(`${API_URL}/deliveries/${params.id}`, {
           headers: {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },

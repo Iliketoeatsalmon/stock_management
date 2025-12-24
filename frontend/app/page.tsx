@@ -5,8 +5,7 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Lock, User, ArrowRight, AlertCircle, Package } from "lucide-react"
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+import { api } from "@/lib/api"
 
 export default function LoginPage() {
   const [username, setUsername] = useState("")
@@ -28,22 +27,16 @@ export default function LoginPage() {
     setError("")
 
     try {
-      const res = await fetch(`${API_URL}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      })
-
-      if (!res.ok) {
-        throw new Error("Invalid credentials")
-      }
-
-      const data = await res.json()
+      const data = await api.post("/auth/login", { username, password })
       localStorage.setItem("token", data.access_token)
       localStorage.setItem("user", JSON.stringify(data.user))
       router.push("/dashboard")
-    } catch (err) {
-      setError("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง")
+    } catch (err: any) {
+      if (err instanceof Error && err.message === "Unauthorized") {
+        setError("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง")
+      } else {
+        setError("เกิดข้อผิดพลาด กรุณาลองใหม่")
+      }
     } finally {
       setLoading(false)
     }

@@ -6,7 +6,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
-import { api, API_URL } from "@/lib/api"
+import { api, API_URL, resolveUploadUrl } from "@/lib/api"
 import { ArrowLeft, Save } from "lucide-react"
 import Link from "next/link"
 
@@ -45,11 +45,11 @@ export default function NewProductPage() {
         setUploading(true)
         const fd = new FormData()
         fd.append("file", imageFile)
-        const uploadRes = await api.upload("/api/upload-image", fd)
-        imageUrl = uploadRes.url.startsWith("http") ? uploadRes.url : `${API_URL}${uploadRes.url}`
+        const uploadRes = await api.upload("/upload-image", fd)
+        imageUrl = resolveUploadUrl(uploadRes.url)
       }
 
-      await api.post("/api/products", { ...form, image_url: imageUrl })
+      await api.post("/products", { ...form, image_url: imageUrl })
       router.push("/products")
     } catch (err: any) {
       setError(err.message || "เกิดข้อผิดพลาด")

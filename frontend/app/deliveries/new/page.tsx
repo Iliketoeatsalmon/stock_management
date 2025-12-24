@@ -36,7 +36,7 @@ export default function NewDeliveryPage() {
 
   const loadData = async () => {
     try {
-      const [customersData, productsData] = await Promise.all([api.get("/api/customers"), api.get("/api/products")])
+      const [customersData, productsData] = await Promise.all([api.get("/customers"), api.get("/products")])
       setCustomers(customersData)
       setProducts(productsData.map((p: any) => ({ ...p, id: Number(p.id) || p.id })))
     } catch (err) {
@@ -75,7 +75,7 @@ export default function NewDeliveryPage() {
 
     try {
       const payloadItems = items.map(({ product_id, quantity }) => ({ product_id, quantity }))
-      const result = await api.post("/api/deliveries", { ...form, items: payloadItems })
+      const result = await api.post("/deliveries", { ...form, items: payloadItems })
       router.push(`/deliveries/${result.id}`)
     } catch (err: any) {
       setError(err.message || "เกิดข้อผิดพลาด")

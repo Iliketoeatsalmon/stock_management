@@ -32,7 +32,7 @@ export default function SuppliersPage() {
 
   const loadSuppliers = async () => {
     try {
-      const result = await api.get("/api/suppliers")
+      const result = await api.get("/suppliers")
       setSuppliers(result)
     } catch (err) {
       console.error("Failed to load suppliers:", err)
@@ -44,7 +44,7 @@ export default function SuppliersPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await api.post("/api/suppliers", form)
+      await api.post("/suppliers", form)
       setShowModal(false)
       setForm({ name: "", contact_person: "", phone: "", email: "", address: "", tax_id: "" })
       loadSuppliers()
@@ -71,7 +71,7 @@ export default function SuppliersPage() {
             </button>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>

@@ -41,7 +41,7 @@ export default function ProductsPage() {
 
   const loadProducts = async () => {
     try {
-      const endpoint = search ? `/api/products?search=${encodeURIComponent(search)}` : "/api/products"
+      const endpoint = search ? `/products?search=${encodeURIComponent(search)}` : "/products"
       const result = await api.get(endpoint)
       setProducts(result)
     } catch (err) {
@@ -67,8 +67,8 @@ export default function ProductsPage() {
   const uploadImage = async (file: File) => {
     const fd = new FormData()
     fd.append("file", file)
-    const res = await api.upload("/api/upload-image", fd)
-    return res.url.startsWith("http") ? res.url : `${API_URL}${res.url}`
+    const res = await api.upload("/upload-image", fd)
+    return res.url.startsWith("http") ? res.url : res.url
   }
 
   const handleEditSubmit = async (e: React.FormEvent) => {
@@ -80,7 +80,7 @@ export default function ProductsPage() {
       if (editFile) {
         imageUrl = await uploadImage(editFile)
       }
-      await api.put(`/api/products/${editing.id}`, {
+      await api.put(`/products/${editing.id}`, {
         ...editForm,
         image_url: imageUrl,
       })
@@ -105,7 +105,12 @@ export default function ProductsPage() {
 
   const getImageSrc = (imageUrl?: string) => {
     if (!imageUrl) return ""
-    return imageUrl.startsWith("http") ? imageUrl : `${API_URL}${imageUrl}`
+    if (imageUrl.startsWith("http")) return imageUrl
+    // If the stored URL already includes the API prefix ("/api/..."), use as-is.
+    if (imageUrl.startsWith("/api")) return imageUrl
+    // If the stored URL is a backend uploads path ("/uploads/.."), prefix with API base so nginx routes it to backend.
+    if (imageUrl.startsWith("/uploads")) return `${API_URL}${imageUrl}`
+    return `${API_URL}${imageUrl}`
   }
 
   return (
@@ -138,7 +143,7 @@ export default function ProductsPage() {
             </div>
 
             {/* Products Table */}
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>

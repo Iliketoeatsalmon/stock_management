@@ -37,6 +37,29 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE IF EXISTS suppliers ADD COLUMN IF NOT EXISTS tax_id VARCHAR(30)"))
     conn.execute(text("ALTER TABLE IF EXISTS delivery_items ADD COLUMN IF NOT EXISTS note TEXT"))
     conn.execute(text("ALTER TABLE IF EXISTS users ALTER COLUMN email DROP NOT NULL"))
+    # Ensure `customers.id` has a default sequence (fix when table was created without SERIAL default)
+    try:
+        # Ensure sequences/defaults for common tables with SERIAL-like ids
+        tables = [
+            "customers",
+            "deliveries",
+            "delivery_items",
+            "suppliers",
+            "products",
+            "purchases",
+            "purchase_items",
+            "movements",
+            "users",
+        ]
+        for t in tables:
+            seq = f"{t}_id_seq"
+            conn.execute(text(f"CREATE SEQUENCE IF NOT EXISTS {seq}"))
+            conn.execute(text(f"ALTER SEQUENCE {seq} OWNED BY {t}.id"))
+            conn.execute(text(f"ALTER TABLE {t} ALTER COLUMN id SET DEFAULT nextval('{seq}'::regclass)"))
+            conn.execute(text(f"SELECT setval('{seq}', COALESCE((SELECT MAX(id) FROM {t}), 1), true)"))
+    except Exception:
+        # If tables don't exist yet or any permission issue, skip sequence fixes
+        pass
 
 def get_db():
     db = SessionLocal()
@@ -44,6 +67,22 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def ensure_table_id_sequence(db: Session, table: str):
+    # Check if id column has a default; if not, create/attach a sequence
+    col_def = db.execute(text("SELECT column_default FROM information_schema.columns WHERE table_name = :table AND column_name = 'id'"), {"table": table}).scalar()
+    if col_def:
+        return
+    seq = f"{table}_id_seq"
+    try:
+        db.execute(text(f"CREATE SEQUENCE IF NOT EXISTS {seq}"))
+        db.execute(text(f"ALTER SEQUENCE {seq} OWNED BY {table}.id"))
+        db.execute(text(f"ALTER TABLE {table} ALTER COLUMN id SET DEFAULT nextval('{seq}'::regclass)"))
+        db.execute(text(f"SELECT setval('{seq}', COALESCE((SELECT MAX(id) FROM {table}), 1), true)"))
+    except Exception:
+        # best-effort; if it fails let the caller handle resulting DB errors
+        pass
 
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -200,6 +239,8 @@ app.add_middleware(
 # Serve uploaded images
 os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# Also serve uploads under /api/uploads to support older client URLs
+app.mount("/api/uploads", StaticFiles(directory="uploads"), name="api_uploads")
 
 # Auth Routes
 @app.post("/api/auth/login")
@@ -238,59 +279,143 @@ def get_me(user = Depends(get_current_user)):
 
 # Dashboard
 @app.get("/api/dashboard")
-def get_dashboard(db: Session = Depends(get_db), user = Depends(get_current_user)):
-    total_products = db.execute(text("SELECT COUNT(*) FROM products WHERE is_active = true")).scalar()
-    
+def get_dashboard(
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    # จำนวนสินค้า
+    total_products = db.execute(
+        text("SELECT COUNT(*) FROM products WHERE is_active = true")
+    ).scalar()
+
+    # สินค้าที่ stock ต่ำกว่าขั้นต่ำ
     low_stock_query = """
-        SELECT p.id, p.code, p.name, p.unit, p.min_stock,
-            COALESCE(SUM(CASE WHEN m.movement_type = 'IN' THEN m.quantity ELSE -m.quantity END), 0) as current_stock
+        SELECT
+            p.id,
+            p.code,
+            p.name,
+            p.unit,
+            p.min_stock,
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN m.movement_type = 'IN' THEN m.quantity
+                        ELSE -m.quantity
+                    END
+                ),
+                0
+            ) AS current_stock
         FROM products p
         LEFT JOIN movements m ON p.id = m.product_id
         WHERE p.is_active = true
-        GROUP BY p.id
-        HAVING COALESCE(SUM(CASE WHEN m.movement_type = 'IN' THEN m.quantity ELSE -m.quantity END), 0) <= p.min_stock
+        GROUP BY
+            p.id,
+            p.code,
+            p.name,
+            p.unit,
+            p.min_stock
+        HAVING COALESCE(
+                SUM(
+                    CASE
+                        WHEN m.movement_type = 'IN' THEN m.quantity
+                        ELSE -m.quantity
+                    END
+                ),
+                0
+            ) <= p.min_stock
+        ORDER BY p.name
     """
-    low_stock = db.execute(text(low_stock_query)).fetchall()
-    
-    recent_movements = db.execute(text("""
-        SELECT m.*, p.name as product_name, p.code as product_code, u.full_name as user_name
+    low_stock_rows = db.execute(text(low_stock_query)).fetchall()
+    low_stock = [dict(row._mapping) for row in low_stock_rows]
+
+    # movement ล่าสุด
+    recent_movements_rows = db.execute(text("""
+        SELECT
+            m.*,
+            p.name AS product_name,
+            p.code AS product_code,
+            u.full_name AS user_name
         FROM movements m
         JOIN products p ON m.product_id = p.id
         LEFT JOIN users u ON m.created_by = u.id
         ORDER BY m.created_at DESC
         LIMIT 10
     """)).fetchall()
-    
-    total_customers = db.execute(text("SELECT COUNT(*) FROM customers WHERE is_active = true")).scalar()
-    total_suppliers = db.execute(text("SELECT COUNT(*) FROM suppliers WHERE is_active = true")).scalar()
-    
+    recent_movements = [dict(row._mapping) for row in recent_movements_rows]
+
+    # จำนวนลูกค้า/ซัพพลายเออร์
+    total_customers = db.execute(
+        text("SELECT COUNT(*) FROM customers WHERE is_active = true")
+    ).scalar()
+    total_suppliers = db.execute(
+        text("SELECT COUNT(*) FROM suppliers WHERE is_active = true")
+    ).scalar()
+
     return {
         "total_products": total_products,
         "low_stock_count": len(low_stock),
-        "low_stock_products": [dict(row._mapping) for row in low_stock],
-        "recent_movements": [dict(row._mapping) for row in recent_movements],
+        "low_stock_products": low_stock,
+        "recent_movements": recent_movements,
         "total_customers": total_customers,
-        "total_suppliers": total_suppliers
+        "total_suppliers": total_suppliers,
     }
 
 # Products
 @app.get("/api/products")
-def get_products(search: Optional[str] = None, db: Session = Depends(get_db), user = Depends(get_current_user)):
+def get_products(
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user),
+):
     query = """
-        SELECT p.*, 
-            COALESCE(SUM(CASE WHEN m.movement_type = 'IN' THEN m.quantity ELSE -m.quantity END), 0) as current_stock
+        SELECT
+            p.id,
+            p.code,
+            p.name,
+            p.description,
+            p.unit,
+            p.min_stock,
+            p.image_url,
+            p.is_active,
+            p.created_at,
+            p.updated_at,
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN m.movement_type = 'IN' THEN m.quantity
+                        ELSE -m.quantity
+                    END
+                ),
+                0
+            ) AS current_stock
         FROM products p
         LEFT JOIN movements m ON p.id = m.product_id
         WHERE p.is_active = true
     """
+
     params = {}
-    
+
     if search:
-        query += " AND (p.name ILIKE :search OR p.code ILIKE :search)"
+        query += """
+            AND (p.name ILIKE :search OR p.code ILIKE :search)
+        """
         params["search"] = f"%{search}%"
-    
-    query += " GROUP BY p.id ORDER BY p.name"
-    
+
+    query += """
+        GROUP BY
+            p.id,
+            p.code,
+            p.name,
+            p.description,
+            p.unit,
+            p.min_stock,
+            p.image_url,
+            p.is_active,
+            p.created_at,
+            p.updated_at
+        ORDER BY p.name
+    """
+
     result = db.execute(text(query), params)
     return [dict(row._mapping) for row in result.fetchall()]
 
@@ -352,19 +477,28 @@ def delete_product(product_id: int, db: Session = Depends(get_db), user = Depend
 
 # Reports
 @app.get("/api/reports/stock")
-def report_stock(filter: Optional[str] = None, db: Session = Depends(get_db), user = Depends(get_current_user)):
+def report_stock(db: Session = Depends(get_db), user = Depends(get_current_user)):
     query = """
-        SELECT p.*, 
-            COALESCE(SUM(CASE WHEN m.movement_type = 'IN' THEN m.quantity ELSE -m.quantity END), 0) as current_stock
+        SELECT
+            p.*,
+            COALESCE(s.current_stock, 0) AS current_stock
         FROM products p
-        LEFT JOIN movements m ON p.id = m.product_id
-        WHERE p.is_active = true
-        GROUP BY p.id
+        LEFT JOIN (
+            SELECT
+                product_id,
+                SUM(
+                    CASE
+                        WHEN movement_type = 'IN' THEN quantity
+                        ELSE -quantity
+                    END
+                ) AS current_stock
+            FROM movements
+            GROUP BY product_id
+        ) AS s
+            ON p.id = s.product_id
+        WHERE p.is_active = TRUE
+        ORDER BY p.name;
     """
-    if filter == "low":
-        query += " HAVING COALESCE(SUM(CASE WHEN m.movement_type = 'IN' THEN m.quantity ELSE -m.quantity END), 0) <= p.min_stock"
-    elif filter == "available":
-        query += " HAVING COALESCE(SUM(CASE WHEN m.movement_type = 'IN' THEN m.quantity ELSE -m.quantity END), 0) > 0"
     result = db.execute(text(query))
     return [dict(row._mapping) for row in result.fetchall()]
 
@@ -553,12 +687,15 @@ def delete_user(user_id: int, db: Session = Depends(get_db), user = Depends(get_
 def get_purchases(db: Session = Depends(get_db), user = Depends(get_current_user)):
     result = db.execute(text("""
         SELECT p.*, s.name as supplier_name, u.full_name as created_by_name,
-            COALESCE(SUM(pi.quantity), 0) AS total_qty
+            COALESCE(pi_sum.total_qty, 0) AS total_qty
         FROM purchases p
         LEFT JOIN suppliers s ON p.supplier_id = s.id
         LEFT JOIN users u ON p.created_by = u.id
-        LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
-        GROUP BY p.id, s.name, u.full_name
+        LEFT JOIN (
+            SELECT purchase_id, SUM(quantity) AS total_qty
+            FROM purchase_items
+            GROUP BY purchase_id
+        ) pi_sum ON pi_sum.purchase_id = p.id
         ORDER BY p.created_at DESC
     """))
     return [dict(row._mapping) for row in result.fetchall()]
@@ -704,6 +841,9 @@ def create_delivery(delivery: DeliveryCreate, db: Session = Depends(get_db), use
     ), {"pattern": f"DO-{today}%"}).scalar()
     delivery_number = f"DO-{today}-{str(count + 1).zfill(4)}"
     
+    # ensure id default/sequence exists for deliveries table (fix for missing SERIAL defaults)
+    ensure_table_id_sequence(db, "deliveries")
+
     result = db.execute(text("""
         INSERT INTO deliveries (delivery_number, customer_id, delivery_date, notes, created_by, status)
         VALUES (:delivery_number, :customer_id, :delivery_date, :notes, :created_by, 'draft')
@@ -719,6 +859,8 @@ def create_delivery(delivery: DeliveryCreate, db: Session = Depends(get_db), use
     delivery_id = delivery_row.id
     
     for item in delivery.items:
+        # ensure delivery_items id default exists before inserting rows
+        ensure_table_id_sequence(db, "delivery_items")
         db.execute(text("""
             INSERT INTO delivery_items (delivery_id, product_id, quantity, note)
             VALUES (:delivery_id, :product_id, :quantity, :note)
@@ -866,3 +1008,6 @@ def get_stock_card(product_id: int, db: Session = Depends(get_db), user = Depend
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
+@app.get("/api/health")
+def api_health():
+    return {"status": "ok"}

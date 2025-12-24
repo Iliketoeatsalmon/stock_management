@@ -6,7 +6,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
-import { api, API_URL } from "@/lib/api"
+import { api, API_URL, resolveUploadUrl } from "@/lib/api"
 import { ArrowLeft, Save, Plus, Upload, X } from "lucide-react"
 import Link from "next/link"
 
@@ -40,7 +40,7 @@ export default function ManualStockInPage() {
 
   const loadProducts = async () => {
     try {
-      const data = await api.get("/api/products")
+      const data = await api.get("/products")
       setProducts(data)
     } catch (err) {
       console.error("Failed to load products:", err)
@@ -54,7 +54,7 @@ export default function ManualStockInPage() {
     setSuccess("")
 
     try {
-      await api.post("/api/stock/manual-in", form)
+      await api.post("/stock/manual-in", form)
       setSuccess("เพิ่มสต๊อกสำเร็จ")
       setForm({ product_id: 0, quantity: 1, notes: "" })
     } catch (err: any) {
@@ -175,11 +175,11 @@ export default function ManualStockInPage() {
                   if (productImageFile) {
                     const fd = new FormData()
                     fd.append("file", productImageFile)
-                    const res = await api.upload("/api/upload-image", fd)
-                    imageUrl = res.url.startsWith("http") ? res.url : `${API_URL}${res.url}`
+                    const res = await api.upload("/upload-image", fd)
+                    imageUrl = resolveUploadUrl(res.url)
                   }
-                  const created = await api.post("/api/products", { ...productForm, image_url: imageUrl })
-                  const productsData = await api.get("/api/products")
+                  const created = await api.post("/products", { ...productForm, image_url: imageUrl })
+                  const productsData = await api.get("/products")
                   setProducts(productsData)
                   setForm((prev) => ({ ...prev, product_id: created.id }))
                   setShowProductModal(false)

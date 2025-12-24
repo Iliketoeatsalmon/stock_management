@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
-import { api, API_URL } from "@/lib/api"
+import { api, API_URL, resolveUploadUrl } from "@/lib/api"
 import { FileText, Printer, RefreshCcw, Filter } from "lucide-react"
 
 interface StockRow {
@@ -28,7 +28,7 @@ export default function StockReportPage() {
   const loadStock = async () => {
     setStockLoading(true)
     try {
-      const result = await api.get(`/api/reports/stock?filter=${stockFilter}`)
+      const result = await api.get(`/reports/stock?filter=${stockFilter}`)
       setStockData(result)
     } catch (err) {
       console.error("Failed to load stock report:", err)
@@ -110,7 +110,7 @@ export default function StockReportPage() {
                 รายการ: {stockData.length.toLocaleString()} | ตัวกรอง:{" "}
                 {stockFilter === "all" ? "ทั้งหมด" : stockFilter === "available" ? "มีของคงเหลือ" : "ใกล้หมด"}
               </div>
-              <div className="overflow-hidden border border-gray-200 rounded-lg">
+              <div className="overflow-x-auto border border-gray-200 rounded-lg">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-100">
                     <tr>
@@ -143,7 +143,7 @@ export default function StockReportPage() {
                           <td className="border border-gray-200 px-3 py-2">
                             {p.image_url ? (
                               <img
-                                src={p.image_url.startsWith("http") ? p.image_url : `${API_URL}${p.image_url}`}
+                                src={resolveUploadUrl(p.image_url || "")}
                                 className="w-12 h-12 object-cover mx-auto"
                                 alt={p.name}
                               />
