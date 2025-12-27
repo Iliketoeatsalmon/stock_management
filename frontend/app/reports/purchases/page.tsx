@@ -76,7 +76,7 @@ export default function PurchaseReportPage() {
         <div className="print:hidden">
           <Header title="รายงานการซื้อ" />
         </div>
-        <main className="flex-1 p-6 space-y-4 print:p-0 print:pt-4">
+        <main className="flex-1 p-4 sm:p-6 space-y-4 print:p-0 print:pt-4">
           <style>{`
             @media print {
               .print\\:hidden { display: none !important; }

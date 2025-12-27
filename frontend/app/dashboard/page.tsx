@@ -52,7 +52,7 @@ export default function DashboardPage() {
       <div className="flex-1 flex flex-col">
         <Header title="Dashboard" />
 
-        <main className="flex-1 p-6">
+        <main className="flex-1 p-4 sm:p-6">
           {/* Quick Actions */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <Link

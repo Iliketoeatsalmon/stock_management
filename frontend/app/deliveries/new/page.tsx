@@ -90,7 +90,7 @@ export default function NewDeliveryPage() {
       <div className="flex-1 flex flex-col">
         <Header title="สร้างใบส่งของ" />
 
-        <main className="flex-1 p-6">
+        <main className="flex-1 p-4 sm:p-6">
           <Link href="/deliveries" className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6">
             <ArrowLeft className="w-4 h-4" />
             กลับ

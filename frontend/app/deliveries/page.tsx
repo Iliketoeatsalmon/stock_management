@@ -56,7 +56,7 @@ export default function DeliveriesPage() {
       <div className="flex-1 flex flex-col">
         <Header title="ใบส่งของ" />
 
-        <main className="flex-1 p-6">
+        <main className="flex-1 p-4 sm:p-6">
           <div className="flex items-center justify-between mb-6">
             <p className="text-gray-600">รายการใบส่งของทั้งหมด</p>
             <Link

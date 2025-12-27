@@ -5,9 +5,9 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
-import { api, API_URL, resolveUploadUrl } from "@/lib/api"
+import { api, resolveUploadUrl } from "@/lib/api"
 import { Plus, Users, Shield, User } from "lucide-react"
-import { loadCompanySettings, saveCompanySettings } from "@/lib/company"
+import { fetchCompanySettings, loadCompanySettings, saveCompanySettings } from "@/lib/company"
 
 interface UserData {
   id: number
@@ -24,6 +24,7 @@ export default function UsersPage() {
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState({ username: "", email: "", password: "", full_name: "", role: "staff" })
   const [currentRole, setCurrentRole] = useState<string>("")
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null)
   const [showCompany, setShowCompany] = useState(false)
   const [companyForm, setCompanyForm] = useState(loadCompanySettings())
   const [logoFile, setLogoFile] = useState<File | null>(null)
@@ -32,11 +33,28 @@ export default function UsersPage() {
     const stored = localStorage.getItem("user")
     if (stored) {
       try {
-        setCurrentRole(JSON.parse(stored).role || "")
+        const parsed = JSON.parse(stored)
+        setCurrentRole(parsed.role || "")
+        setCurrentUserId(typeof parsed.id === "number" ? parsed.id : null)
       } catch {}
     }
     loadUsers()
   }, [])
+
+  useEffect(() => {
+    if (!showCompany) return
+    let active = true
+    fetchCompanySettings()
+      .then((settings) => {
+        if (!active) return
+        setCompanyForm(settings)
+        setLogoFile(null)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [showCompany])
 
   const loadUsers = async () => {
     try {
@@ -57,7 +75,7 @@ export default function UsersPage() {
       setForm({ username: "", email: "", password: "", full_name: "", role: "staff" })
       loadUsers()
     } catch (err) {
-      alert("เกิดข้อผิดพลาด")
+      alert("เพิ่มผู้ใช้งานไม่สำเร็จ")
     }
   }
 
@@ -67,7 +85,7 @@ export default function UsersPage() {
       <div className="flex-1 flex flex-col">
         <Header title="ผู้ใช้งาน" />
 
-        <main className="flex-1 p-6">
+        <main className="flex-1 p-4 sm:p-6">
           <div className="flex items-center justify-between mb-6">
             <p className="text-gray-600">จัดการผู้ใช้งานในระบบ</p>
             {currentRole === "admin" && (
@@ -97,7 +115,7 @@ export default function UsersPage() {
             ) : users.length === 0 ? (
               <div className="text-center py-12 text-gray-500">
                 <Users className="w-12 h-12 mx-auto mb-2 text-gray-300" />
-                <p>ยังไม่มีผู้ใช้งาน</p>
+                <p>ยังไม่มีผู้ใช้งานในระบบ</p>
               </div>
             ) : (
               users.map((user) => (
@@ -107,7 +125,9 @@ export default function UsersPage() {
                 >
                   <div className="flex items-center gap-4">
                     <div
-                      className={`w-12 h-12 rounded-full flex items-center justify-center ${user.role === "admin" ? "bg-purple-100" : "bg-blue-100"}`}
+                      className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                        user.role === "admin" ? "bg-purple-100" : "bg-blue-100"
+                      }`}
                     >
                       {user.role === "admin" ? (
                         <Shield className="w-6 h-6 text-purple-600" />
@@ -124,29 +144,40 @@ export default function UsersPage() {
                   </div>
                   <div className="flex items-center gap-3">
                     <span
-                      className={`px-3 py-1 rounded-full text-xs font-medium ${user.role === "admin" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}
+                      className={`px-3 py-1 rounded-full text-xs font-medium ${
+                        user.role === "admin" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
+                      }`}
                     >
                       {user.role}
                     </span>
                     <span
-                      className={`px-3 py-1 rounded-full text-xs ${user.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"}`}
+                      className={`px-3 py-1 rounded-full text-xs ${
+                        user.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
+                      }`}
                     >
                       {user.is_active ? "Active" : "Inactive"}
                     </span>
                     {currentRole === "admin" && (
                       <button
                         onClick={async () => {
-                          if (!confirm(`ลบผู้ใช้ ${user.username}?`)) return
+                          const nextStatus = !user.is_active
+                          const actionLabel = nextStatus ? "เปิดใช้งาน" : "ปิดใช้งาน"
+                          if (!confirm(`${actionLabel} ผู้ใช้ ${user.username}?`)) return
                           try {
-                            await api.delete(`/users/${user.id}`)
+                            await api.put(`/users/${user.id}/status`, { is_active: nextStatus })
                             loadUsers()
                           } catch (err) {
-                            alert("ลบผู้ใช้ไม่สำเร็จ")
+                            alert("อัปเดตสถานะผู้ใช้ไม่สำเร็จ")
                           }
                         }}
-                        className="px-3 py-1 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
+                        disabled={user.id === currentUserId && user.is_active}
+                        className={`px-3 py-1 text-xs rounded-lg border ${
+                          user.is_active
+                            ? "text-red-600 border-red-200 hover:bg-red-50"
+                            : "text-green-700 border-green-200 hover:bg-green-50"
+                        } disabled:opacity-50 disabled:cursor-not-allowed`}
                       >
-                        ลบ
+                        {user.is_active ? "ปิดใช้งาน" : "เปิดใช้งาน"}
                       </button>
                     )}
                   </div>
@@ -202,7 +233,7 @@ export default function UsersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">บทบาท</label>
                 <select
                   value={form.role}
                   onChange={(e) => setForm({ ...form, role: e.target.value })}
@@ -244,11 +275,14 @@ export default function UsersPage() {
                     const res = await api.upload("/upload-image", fd)
                     logoUrl = resolveUploadUrl(res.url)
                   }
-                  saveCompanySettings({ ...companyForm, logo: logoUrl })
+                  const updatedSettings = { ...companyForm, logo: logoUrl }
+                  await api.put("/company-settings", updatedSettings)
+                  saveCompanySettings(updatedSettings)
+                  setCompanyForm(updatedSettings)
                   setShowCompany(false)
-                  alert("บันทึกข้อมูลบริษัทแล้ว")
+                  alert("บันทึกการตั้งค่าบริษัทสำเร็จ")
                 }
-                run().catch(() => alert("บันทึกไม่สำเร็จ"))
+                run().catch(() => alert("บันทึกการตั้งค่าบริษัทไม่สำเร็จ"))
               }}
               className="space-y-3 text-sm"
             >
@@ -309,7 +343,7 @@ export default function UsersPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-gray-700 mb-1">โลโก้ (อัปโหลดไฟล์)</label>
+                  <label className="block text-gray-700 mb-1">โลโก้บริษัท (ถ้ามี)</label>
                   <div className="flex items-center gap-3">
                     <input
                       type="file"
@@ -328,7 +362,9 @@ export default function UsersPage() {
                       />
                     )}
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">ไม่กรอกจะใช้ไฟล์เดิม (ค่าปัจจุบัน: {companyForm.logo || "-"})</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    ไม่อัปโหลดจะใช้ไฟล์เดิม (ค่าปัจจุบัน: {companyForm.logo || "-"})
+                  </p>
                 </div>
               </div>
               <div className="flex justify-end gap-3 pt-3">

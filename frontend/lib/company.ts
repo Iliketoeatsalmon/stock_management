@@ -1,4 +1,5 @@
 import { BASE_PATH, withBasePath } from "@/lib/base-path"
+import { api } from "@/lib/api"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "/api"
 
@@ -55,6 +56,26 @@ export function loadCompanySettings(): CompanySettings {
 export function saveCompanySettings(settings: CompanySettings) {
   if (typeof window === "undefined") return
   localStorage.setItem("companySettings", JSON.stringify(settings))
+}
+
+export async function fetchCompanySettings(): Promise<CompanySettings> {
+  try {
+    const data = await api.get("/company-settings")
+    const local = loadCompanySettings()
+    const merged = { ...local }
+    for (const [key, value] of Object.entries(data || {})) {
+      if (typeof value === "string") {
+        if (value.trim() !== "") {
+          ;(merged as any)[key] = value
+        }
+      } else if (value != null) {
+        ;(merged as any)[key] = value
+      }
+    }
+    return { ...merged, logo: normalizeLogoPath(merged.logo) }
+  } catch {
+    return loadCompanySettings()
+  }
 }
 
 export { defaultSettings }

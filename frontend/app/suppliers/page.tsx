@@ -11,20 +11,52 @@ import { Plus, Users } from "lucide-react"
 interface Supplier {
   id: number
   name: string
+  contact_person?: string | null
+  phone?: string | null
+  email?: string | null
+  address?: string | null
+  tax_id?: string | null
+}
+
+type SupplierForm = {
+  name: string
   contact_person: string
   phone: string
-  email?: string | null
+  email: string
   address: string
-  tax_id?: string
+  tax_id: string
 }
+
+const emptyForm: SupplierForm = {
+  name: "",
+  contact_person: "",
+  phone: "",
+  email: "",
+  address: "",
+  tax_id: "",
+}
+
+const normalizeOptional = (value: string) => {
+  const trimmed = value.trim()
+  return trimmed ? trimmed : null
+}
+
+const normalizeSupplierPayload = (form: SupplierForm) => ({
+  name: form.name.trim(),
+  contact_person: normalizeOptional(form.contact_person),
+  phone: normalizeOptional(form.phone),
+  email: normalizeOptional(form.email),
+  address: normalizeOptional(form.address),
+  tax_id: normalizeOptional(form.tax_id),
+})
 
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
-  const [form, setForm] = useState({ name: "", contact_person: "", phone: "", email: "", address: "", tax_id: "" })
+  const [form, setForm] = useState<SupplierForm>(emptyForm)
   const [editing, setEditing] = useState<Supplier | null>(null)
-  const [editForm, setEditForm] = useState({ name: "", contact_person: "", phone: "", email: "", address: "", tax_id: "" })
+  const [editForm, setEditForm] = useState<SupplierForm>(emptyForm)
 
   useEffect(() => {
     loadSuppliers()
@@ -43,13 +75,18 @@ export default function SuppliersPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    const payload = normalizeSupplierPayload(form)
+    if (!payload.name) {
+      alert("กรุณากรอกชื่อซัพพลายเออร์")
+      return
+    }
     try {
-      await api.post("/suppliers", form)
+      await api.post("/suppliers", payload)
       setShowModal(false)
-      setForm({ name: "", contact_person: "", phone: "", email: "", address: "", tax_id: "" })
+      setForm(emptyForm)
       loadSuppliers()
-    } catch (err) {
-      alert("เกิดข้อผิดพลาด")
+    } catch (err: any) {
+      alert(err?.message || "เพิ่มซัพพลายเออร์ไม่สำเร็จ")
     }
   }
 
@@ -57,17 +94,17 @@ export default function SuppliersPage() {
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar />
       <div className="flex-1 flex flex-col">
-        <Header title="Supplier" />
+        <Header title="ซัพพลายเออร์" />
 
-        <main className="flex-1 p-6">
+        <main className="flex-1 p-4 sm:p-6">
           <div className="flex items-center justify-between mb-6">
-            <p className="text-gray-600">รายการ Supplier ทั้งหมด</p>
+            <p className="text-gray-600">จัดการซัพพลายเออร์ในระบบ</p>
             <button
               onClick={() => setShowModal(true)}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             >
               <Plus className="w-5 h-5" />
-              เพิ่ม Supplier
+              เพิ่มซัพพลายเออร์
             </button>
           </div>
 
@@ -85,15 +122,15 @@ export default function SuppliersPage() {
               <tbody className="divide-y divide-gray-200">
                 {loading ? (
                   <tr>
-                    <td colSpan={4} className="px-6 py-12 text-center">
+                    <td colSpan={5} className="px-6 py-12 text-center">
                       <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto"></div>
                     </td>
                   </tr>
                 ) : suppliers.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
                       <Users className="w-12 h-12 mx-auto mb-2 text-gray-300" />
-                      <p>ยังไม่มี Supplier</p>
+                      <p>ยังไม่มีซัพพลายเออร์</p>
                     </td>
                   </tr>
                 ) : (
@@ -123,12 +160,12 @@ export default function SuppliersPage() {
                           </button>
                           <button
                             onClick={async () => {
-                              if (!confirm(`ลบ Supplier ${supplier.name}?`)) return
+                              if (!confirm(`ลบซัพพลายเออร์ ${supplier.name}?`)) return
                               try {
-                                await api.delete(`/api/suppliers/${supplier.id}`)
+                                await api.delete(`/suppliers/${supplier.id}`)
                                 loadSuppliers()
                               } catch (err) {
-                                alert("ลบไม่สำเร็จ")
+                                alert("ลบซัพพลายเออร์ไม่สำเร็จ")
                               }
                             }}
                             className="px-3 py-1 text-sm border border-red-300 text-red-600 rounded-lg hover:bg-red-50"
@@ -149,10 +186,10 @@ export default function SuppliersPage() {
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 w-full max-w-md">
-            <h3 className="text-lg font-semibold mb-4">เพิ่ม Supplier</h3>
+            <h3 className="text-lg font-semibold mb-4">เพิ่มซัพพลายเออร์</h3>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อ *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อซัพพลายเออร์ *</label>
                 <input
                   type="text"
                   value={form.name}
@@ -162,7 +199,7 @@ export default function SuppliersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ผู้ติดต่อ</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ผู้ติดต่อ (ไม่บังคับ)</label>
                 <input
                   type="text"
                   value={form.contact_person}
@@ -171,7 +208,7 @@ export default function SuppliersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">โทรศัพท์</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">โทรศัพท์ (ไม่บังคับ)</label>
                 <input
                   type="text"
                   value={form.phone}
@@ -180,7 +217,7 @@ export default function SuppliersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล (ไม่บังคับ)</label>
                 <input
                   type="email"
                   value={form.email}
@@ -189,7 +226,7 @@ export default function SuppliersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">เลขผู้เสียภาษี (ไม่บังคับ)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">เลขประจำตัวผู้เสียภาษี (ไม่บังคับ)</label>
                 <input
                   type="text"
                   value={form.tax_id}
@@ -198,7 +235,7 @@ export default function SuppliersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ที่อยู่</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ที่อยู่ (ไม่บังคับ)</label>
                 <textarea
                   value={form.address}
                   onChange={(e) => setForm({ ...form, address: e.target.value })}
@@ -226,22 +263,27 @@ export default function SuppliersPage() {
       {editing && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 w-full max-w-md">
-            <h3 className="text-lg font-semibold mb-4">แก้ไข Supplier</h3>
+            <h3 className="text-lg font-semibold mb-4">แก้ไขซัพพลายเออร์</h3>
             <form
               onSubmit={async (e) => {
                 e.preventDefault()
+                const payload = normalizeSupplierPayload(editForm)
+                if (!payload.name) {
+                  alert("กรุณากรอกชื่อซัพพลายเออร์")
+                  return
+                }
                 try {
-                  await api.put(`/api/suppliers/${editing.id}`, editForm)
+                  await api.put(`/suppliers/${editing.id}`, payload)
                   setEditing(null)
                   loadSuppliers()
-                } catch (err) {
-                  alert("บันทึกไม่สำเร็จ")
+                } catch (err: any) {
+                  alert(err?.message || "บันทึกซัพพลายเออร์ไม่สำเร็จ")
                 }
               }}
               className="space-y-4"
             >
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อ *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อซัพพลายเออร์ *</label>
                 <input
                   type="text"
                   value={editForm.name}
@@ -251,7 +293,7 @@ export default function SuppliersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ผู้ติดต่อ</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ผู้ติดต่อ (ไม่บังคับ)</label>
                 <input
                   type="text"
                   value={editForm.contact_person}
@@ -260,7 +302,7 @@ export default function SuppliersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">โทรศัพท์</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">โทรศัพท์ (ไม่บังคับ)</label>
                 <input
                   type="text"
                   value={editForm.phone}
@@ -269,7 +311,7 @@ export default function SuppliersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล (ไม่บังคับ)</label>
                 <input
                   type="email"
                   value={editForm.email}
@@ -278,7 +320,7 @@ export default function SuppliersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">เลขผู้เสียภาษี (ไม่บังคับ)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">เลขประจำตัวผู้เสียภาษี (ไม่บังคับ)</label>
                 <input
                   type="text"
                   value={editForm.tax_id}
@@ -287,7 +329,7 @@ export default function SuppliersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ที่อยู่</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ที่อยู่ (ไม่บังคับ)</label>
                 <textarea
                   value={editForm.address}
                   onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}

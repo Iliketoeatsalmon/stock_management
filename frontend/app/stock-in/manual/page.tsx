@@ -73,7 +73,7 @@ export default function ManualStockInPage() {
         <div className="flex-1 flex flex-col">
           <Header title="เพิ่มสต๊อก Manual" />
 
-          <main className="flex-1 p-6">
+          <main className="flex-1 p-4 sm:p-6">
             <div className="max-w-xl">
               <Link href="/dashboard" className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6">
                 <ArrowLeft className="w-4 h-4" />

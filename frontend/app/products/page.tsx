@@ -120,7 +120,7 @@ export default function ProductsPage() {
         <div className="flex-1 flex flex-col">
           <Header title="สินค้า" />
 
-          <main className="flex-1 p-6">
+          <main className="flex-1 p-4 sm:p-6">
             {/* Actions */}
             <div className="flex items-center justify-between mb-6">
               <div className="relative w-96">

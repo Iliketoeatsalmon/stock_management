@@ -11,7 +11,7 @@ export default function ReportsHome() {
       <Sidebar />
       <div className="flex-1 flex flex-col">
         <Header title="รายงาน" />
-        <main className="flex-1 p-6">
+        <main className="flex-1 p-4 sm:p-6">
           <div className="grid md:grid-cols-2 gap-6 max-w-3xl">
             <Link
               href="/reports/stock"

@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
 import { api } from "@/lib/api"
-import { loadCompanySettings } from "@/lib/company"
+import { fetchCompanySettings, loadCompanySettings } from "@/lib/company"
 import { ArrowLeft, CheckCircle, Printer, Trash2, Plus, Minus } from "lucide-react"
 import Link from "next/link"
 import { format } from "date-fns"
@@ -68,12 +68,20 @@ export default function DeliveryDetailPage() {
   const [companyInfo, setCompanyInfo] = useState(loadCompanySettings())
 
   useEffect(() => {
-    setCompanyInfo(loadCompanySettings())
+    let active = true
+    fetchCompanySettings()
+      .then((settings) => {
+        if (active) setCompanyInfo(settings)
+      })
+      .catch(() => {})
     const stored = localStorage.getItem("user")
     if (stored) {
       try {
         setCurrentRole(JSON.parse(stored).role || "")
       } catch {}
+    }
+    return () => {
+      active = false
     }
   }, [])
 
@@ -178,9 +186,9 @@ export default function DeliveryDetailPage() {
       <div className="flex-1 flex flex-col">
         <Header title="รายละเอียดใบส่งของ" />
 
-        <main className="flex-1 p-6 print:p-0">
+        <main className="flex-1 p-4 sm:p-6 print:p-0">
           <style>{`
-            @page { size: A4 portrait; margin: 12mm; }
+            @page { size: A4 portrait; margin: 4mm; }
             @media print {
               body { -webkit-print-color-adjust: exact; color-adjust: exact; }
               .print\\:hidden { display: none !important; }
@@ -188,7 +196,15 @@ export default function DeliveryDetailPage() {
               .page { box-shadow: none !important; border: none !important; }
               * { color: #000 !important; }
               /* Push the signature down on short documents (but still allow long tables to expand) */
-              .print-table { min-height: 130mm; }
+              .print-table { min-height: 0; }
+              .print-area { font-size: 8px; line-height: 1; }
+              .print-table th, .print-table td { padding: 1px !important; }
+              .print-area .leading-relaxed { line-height: 1.2 !important; }
+              .print-area .p-3 { padding: 4px !important; }
+              .print-area .p-2 { padding: 3px !important; }
+              .print-area .text-base { font-size: 10px !important; }
+              .print-area .space-y-1 > :not([hidden]) ~ :not([hidden]) { margin-top: 2px !important; }
+              .signature-block { margin-top: 0 !important; }
               thead { display: table-header-group; }
               tfoot { display: table-footer-group; }
               .signature-block { break-inside: avoid; page-break-inside: avoid; }
@@ -251,8 +267,9 @@ export default function DeliveryDetailPage() {
 
               <div className="grid grid-cols-2 border-t border-gray-400 text-sm print:text-xs">
                 <div className="p-3 space-y-1 border-r border-gray-400">
-                  <div><strong>Attention:</strong> {delivery.customer_name || "-"}</div>
                   <div><strong>Company:</strong> {delivery.customer_name || "-"}</div>
+                  <div><strong>Delivery to:</strong> {delivery.customer_name || "-"}</div>
+                  <div><strong>Contact:</strong> {delivery.customer_contact_person || "-"}</div>
                   <div><strong>Address:</strong> {delivery.customer_address || "-"}</div>
                   <div><strong>Tel:</strong> {delivery.customer_phone || "-"}</div>
                   <div><strong>Fax:</strong> -</div>
@@ -260,8 +277,6 @@ export default function DeliveryDetailPage() {
                 <div className="p-3 space-y-1">
                   <div><strong>Date:</strong> {format(new Date(delivery.delivery_date), "dd/MM/yyyy")}</div>
                   <div><strong>No:</strong> {delivery.delivery_number}</div>
-                  <div><strong>Tel:</strong> {delivery.customer_phone || "-"}</div>
-                  <div><strong>Delivery to:</strong> {delivery.customer_name || "-"}</div>
                   <div>
                     <span
                       className={`px-3 py-1 rounded-full text-xs font-medium ${
@@ -377,17 +392,17 @@ export default function DeliveryDetailPage() {
             </table>
             </div>
 
-            <div className="signature-block text-sm print:text-xs mt-1 print:mt-2">
-              <div className="grid grid-cols-2 text-center gap-2 print:gap-1">
-                <div className="p-3 print:p-2">
+            <div className="signature-block text-sm print:text-xs mt-0 print:mt-0">
+              <div className="grid grid-cols-2 text-center gap-2 print:gap-0">
+                <div className="p-3 print:p-0">
                   ส่วนของลูกค้า/ผู้รับสินค้า<br />
-                  <div className="mt-3">..............................</div>
-                  <div className="mt-2">....../....../......</div>
+                  <div className="mt-1 print:mt-0">..............................</div>
+                  <div className="mt-1 print:mt-0">....../....../......</div>
                 </div>
-                <div className="p-3 print:p-2">
+                <div className="p-3 print:p-0">
                   ส่วนของบริษัท/ผู้ส่งสินค้า<br />
-                  <div className="mt-3">..............................</div>
-                  <div className="mt-2">....../....../......</div>
+                  <div className="mt-1 print:mt-0">..............................</div>
+                  <div className="mt-1 print:mt-0">....../....../......</div>
                 </div>
               </div>
             </div>

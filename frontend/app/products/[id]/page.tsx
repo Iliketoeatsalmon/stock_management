@@ -63,7 +63,7 @@ export default function ProductDetailPage() {
       <div className="flex-1 flex flex-col">
         <Header title="Stock Card" />
 
-        <main className="flex-1 p-6">
+        <main className="flex-1 p-4 sm:p-6">
           <Link href="/products" className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6">
             <ArrowLeft className="w-4 h-4" />
             กลับ

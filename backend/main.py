@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
@@ -14,6 +15,9 @@ from passlib.exc import UnknownHashError
 import os
 import shutil
 import uuid
+import io
+
+from pdf_generator import generate_delivery_pdf
 
 # Settings
 class Settings(BaseSettings):
@@ -33,6 +37,20 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Ensure optional columns exist for new fields
 with engine.begin() as conn:
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS company_settings (
+            id INTEGER PRIMARY KEY,
+            name_th TEXT,
+            name_en TEXT,
+            address TEXT,
+            tax_id TEXT,
+            tel TEXT,
+            fax TEXT,
+            logo TEXT,
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """))
+    conn.execute(text("INSERT INTO company_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING"))
     conn.execute(text("ALTER TABLE IF EXISTS customers ADD COLUMN IF NOT EXISTS tax_id VARCHAR(30)"))
     conn.execute(text("ALTER TABLE IF EXISTS suppliers ADD COLUMN IF NOT EXISTS tax_id VARCHAR(30)"))
     conn.execute(text("ALTER TABLE IF EXISTS delivery_items ADD COLUMN IF NOT EXISTS note TEXT"))
@@ -52,11 +70,24 @@ with engine.begin() as conn:
             "users",
         ]
         for t in tables:
-            seq = f"{t}_id_seq"
-            conn.execute(text(f"CREATE SEQUENCE IF NOT EXISTS {seq}"))
-            conn.execute(text(f"ALTER SEQUENCE {seq} OWNED BY {t}.id"))
-            conn.execute(text(f"ALTER TABLE {t} ALTER COLUMN id SET DEFAULT nextval('{seq}'::regclass)"))
-            conn.execute(text(f"SELECT setval('{seq}', COALESCE((SELECT MAX(id) FROM {t}), 1), true)"))
+            try:
+                row = conn.execute(text("""
+                    SELECT column_default, is_identity
+                    FROM information_schema.columns
+                    WHERE table_name = :table AND column_name = 'id'
+                """), {"table": t}).fetchone()
+                if not row:
+                    continue
+                col_default, is_identity = row
+                if is_identity == "YES" or col_default:
+                    continue
+                seq = f"{t}_id_seq"
+                conn.execute(text(f"CREATE SEQUENCE IF NOT EXISTS {seq}"))
+                conn.execute(text(f"ALTER TABLE {t} ALTER COLUMN id SET DEFAULT nextval('{seq}'::regclass)"))
+                conn.execute(text(f"SELECT setval('{seq}', COALESCE((SELECT MAX(id) FROM {t}), 1), true)"))
+            except Exception:
+                # best-effort; do not block app startup
+                continue
     except Exception:
         # If tables don't exist yet or any permission issue, skip sequence fixes
         pass
@@ -70,19 +101,21 @@ def get_db():
 
 
 def ensure_table_id_sequence(db: Session, table: str):
-    # Check if id column has a default; if not, create/attach a sequence
-    col_def = db.execute(text("SELECT column_default FROM information_schema.columns WHERE table_name = :table AND column_name = 'id'"), {"table": table}).scalar()
-    if col_def:
+    # Check if id column has a default or identity; if not, create/attach a sequence
+    row = db.execute(text("""
+        SELECT column_default, is_identity
+        FROM information_schema.columns
+        WHERE table_name = :table AND column_name = 'id'
+    """), {"table": table}).fetchone()
+    if not row:
+        return
+    col_default, is_identity = row
+    if is_identity == "YES" or col_default:
         return
     seq = f"{table}_id_seq"
-    try:
-        db.execute(text(f"CREATE SEQUENCE IF NOT EXISTS {seq}"))
-        db.execute(text(f"ALTER SEQUENCE {seq} OWNED BY {table}.id"))
-        db.execute(text(f"ALTER TABLE {table} ALTER COLUMN id SET DEFAULT nextval('{seq}'::regclass)"))
-        db.execute(text(f"SELECT setval('{seq}', COALESCE((SELECT MAX(id) FROM {table}), 1), true)"))
-    except Exception:
-        # best-effort; if it fails let the caller handle resulting DB errors
-        pass
+    db.execute(text(f"CREATE SEQUENCE IF NOT EXISTS {seq}"))
+    db.execute(text(f"ALTER TABLE {table} ALTER COLUMN id SET DEFAULT nextval('{seq}'::regclass)"))
+    db.execute(text(f"SELECT setval('{seq}', COALESCE((SELECT MAX(id) FROM {table}), 1), true)"))
 
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -128,6 +161,12 @@ def require_admin(user):
         raise HTTPException(status_code=403, detail="Admin only")
     return user
 
+def normalize_optional_str(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    value = value.strip()
+    return value if value else None
+
 # Pydantic Models
 class LoginRequest(BaseModel):
     username: str
@@ -139,6 +178,18 @@ class UserCreate(BaseModel):
     password: str
     full_name: str
     role: str = "staff"
+
+class UserStatusUpdate(BaseModel):
+    is_active: bool
+
+class CompanySettingsUpdate(BaseModel):
+    nameTh: Optional[str] = None
+    nameEn: Optional[str] = None
+    address: Optional[str] = None
+    taxId: Optional[str] = None
+    tel: Optional[str] = None
+    fax: Optional[str] = None
+    logo: Optional[str] = None
 
 class ProductCreate(BaseModel):
     code: str
@@ -561,19 +612,33 @@ def get_suppliers(db: Session = Depends(get_db), user = Depends(get_current_user
 
 @app.post("/api/suppliers")
 def create_supplier(supplier: SupplierCreate, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    ensure_table_id_sequence(db, "suppliers")
+    data = supplier.model_dump()
+    data["name"] = data["name"].strip()
+    if not data["name"]:
+        raise HTTPException(status_code=400, detail="Name is required")
+    for key in ["contact_person", "phone", "email", "address", "tax_id"]:
+        data[key] = normalize_optional_str(data.get(key))
     result = db.execute(text("""
         INSERT INTO suppliers (name, contact_person, phone, email, address, tax_id)
         VALUES (:name, :contact_person, :phone, :email, :address, :tax_id)
         RETURNING *
-    """), supplier.model_dump())
+    """), data)
     db.commit()
     return dict(result.fetchone()._mapping)
 
 @app.put("/api/suppliers/{supplier_id}")
 def update_supplier(supplier_id: int, data: SupplierUpdate, db: Session = Depends(get_db), user = Depends(get_current_user)):
-    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    updates = data.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+    if "name" in updates:
+        updates["name"] = updates["name"].strip()
+        if not updates["name"]:
+            raise HTTPException(status_code=400, detail="Name is required")
+    for key in ["contact_person", "phone", "email", "address", "tax_id"]:
+        if key in updates:
+            updates[key] = normalize_optional_str(updates[key])
     updates["id"] = supplier_id
     updates["updated_at"] = datetime.now()
     set_clause = ", ".join([f"{k} = :{k}" for k in updates.keys() if k != "id"])
@@ -682,6 +747,106 @@ def delete_user(user_id: int, db: Session = Depends(get_db), user = Depends(get_
         raise HTTPException(status_code=404, detail="User not found")
     return {"message": "User deleted"}
 
+@app.put("/api/users/{user_id}/status")
+def update_user_status(user_id: int, data: UserStatusUpdate, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    require_admin(user)
+    if user_id == user.id and data.is_active is False:
+        raise HTTPException(status_code=400, detail="Cannot deactivate yourself")
+    result = db.execute(text("""
+        UPDATE users SET is_active = :is_active, updated_at = :now WHERE id = :id
+        RETURNING id, is_active
+    """), {"id": user_id, "is_active": data.is_active, "now": datetime.now()})
+    db.commit()
+    row = result.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"id": row.id, "is_active": row.is_active}
+
+def format_company_settings(row):
+    if not row:
+        return {
+            "nameTh": "",
+            "nameEn": "",
+            "address": "",
+            "taxId": "",
+            "tel": "",
+            "fax": "",
+            "logo": "",
+        }
+    return {
+        "nameTh": row.name_th or "",
+        "nameEn": row.name_en or "",
+        "address": row.address or "",
+        "taxId": row.tax_id or "",
+        "tel": row.tel or "",
+        "fax": row.fax or "",
+        "logo": row.logo or "",
+    }
+
+@app.get("/api/company-settings")
+def get_company_settings(db: Session = Depends(get_db)):
+    row = db.execute(text("""
+        SELECT name_th, name_en, address, tax_id, tel, fax, logo
+        FROM company_settings
+        WHERE id = 1
+    """)).fetchone()
+    if not row:
+        db.execute(text("INSERT INTO company_settings (id) VALUES (1)"))
+        db.commit()
+        row = db.execute(text("""
+            SELECT name_th, name_en, address, tax_id, tel, fax, logo
+            FROM company_settings
+            WHERE id = 1
+        """)).fetchone()
+    return format_company_settings(row)
+
+@app.put("/api/company-settings")
+def update_company_settings(
+    data: CompanySettingsUpdate,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    require_admin(user)
+    row = db.execute(text("""
+        SELECT name_th, name_en, address, tax_id, tel, fax, logo
+        FROM company_settings
+        WHERE id = 1
+    """)).fetchone()
+    current = format_company_settings(row)
+    payload = {
+        "name_th": data.nameTh if data.nameTh is not None else current["nameTh"],
+        "name_en": data.nameEn if data.nameEn is not None else current["nameEn"],
+        "address": data.address if data.address is not None else current["address"],
+        "tax_id": data.taxId if data.taxId is not None else current["taxId"],
+        "tel": data.tel if data.tel is not None else current["tel"],
+        "fax": data.fax if data.fax is not None else current["fax"],
+        "logo": data.logo if data.logo is not None else current["logo"],
+        "updated_at": datetime.now(),
+    }
+    db.execute(text("""
+        INSERT INTO company_settings (id, name_th, name_en, address, tax_id, tel, fax, logo, updated_at)
+        VALUES (1, :name_th, :name_en, :address, :tax_id, :tel, :fax, :logo, :updated_at)
+        ON CONFLICT (id) DO UPDATE SET
+            name_th = EXCLUDED.name_th,
+            name_en = EXCLUDED.name_en,
+            address = EXCLUDED.address,
+            tax_id = EXCLUDED.tax_id,
+            tel = EXCLUDED.tel,
+            fax = EXCLUDED.fax,
+            logo = EXCLUDED.logo,
+            updated_at = EXCLUDED.updated_at
+    """), payload)
+    db.commit()
+    return {
+        "nameTh": payload["name_th"] or "",
+        "nameEn": payload["name_en"] or "",
+        "address": payload["address"] or "",
+        "taxId": payload["tax_id"] or "",
+        "tel": payload["tel"] or "",
+        "fax": payload["fax"] or "",
+        "logo": payload["logo"] or "",
+    }
+
 # Purchases (Stock IN)
 @app.get("/api/purchases")
 def get_purchases(db: Session = Depends(get_db), user = Depends(get_current_user)):
@@ -724,8 +889,25 @@ def get_purchase_detail(purchase_id: int, db: Session = Depends(get_db), user = 
         "items": [dict(i._mapping) for i in items],
     }
 
+@app.delete("/api/purchases/{purchase_id}")
+def delete_purchase(purchase_id: int, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    require_admin(user)
+    purchase = db.execute(text("SELECT id FROM purchases WHERE id = :id"), {"id": purchase_id}).fetchone()
+    if not purchase:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    db.execute(
+        text("DELETE FROM movements WHERE reference_type = 'purchase' AND reference_id = :id"),
+        {"id": purchase_id},
+    )
+    db.execute(text("DELETE FROM purchases WHERE id = :id"), {"id": purchase_id})
+    db.commit()
+    return {"message": "Purchase deleted"}
+
 @app.post("/api/purchases")
 def create_purchase(purchase: PurchaseCreate, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    ensure_table_id_sequence(db, "purchases")
+    ensure_table_id_sequence(db, "purchase_items")
+    ensure_table_id_sequence(db, "movements")
     result = db.execute(text("""
         INSERT INTO purchases (invoice_number, supplier_id, purchase_date, notes, attachment_url, created_by, status)
         VALUES (:invoice_number, :supplier_id, :purchase_date, :notes, :attachment_url, :created_by, 'confirmed')
@@ -774,6 +956,7 @@ def create_purchase(purchase: PurchaseCreate, db: Session = Depends(get_db), use
 # Manual Stock IN
 @app.post("/api/stock/manual-in")
 def manual_stock_in(data: ManualStockIn, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    ensure_table_id_sequence(db, "movements")
     db.execute(text("""
         INSERT INTO movements (product_id, movement_type, quantity, reference_type, notes, created_by)
         VALUES (:product_id, 'IN', :quantity, 'manual', :notes, :created_by)
@@ -811,6 +994,7 @@ def get_deliveries(status: Optional[str] = None, db: Session = Depends(get_db), 
 def get_delivery(delivery_id: int, db: Session = Depends(get_db), user = Depends(get_current_user)):
     result = db.execute(text("""
         SELECT d.*, c.name as customer_name, c.address as customer_address,
+            c.phone as customer_phone, c.contact_person as customer_contact_person,
             u1.full_name as created_by_name
         FROM deliveries d
         LEFT JOIN customers c ON d.customer_id = c.id
@@ -832,6 +1016,15 @@ def get_delivery(delivery_id: int, db: Session = Depends(get_db), user = Depends
         **dict(delivery._mapping),
         "items": [dict(row._mapping) for row in items.fetchall()]
     }
+
+@app.get("/api/deliveries/{delivery_id}/pdf")
+def get_delivery_pdf(delivery_id: int, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    delivery = get_delivery(delivery_id, db, user)
+    company = get_company_settings(db)
+    pdf_bytes = generate_delivery_pdf(delivery, company)
+    filename = f"delivery-{delivery_id}.pdf"
+    headers = {"Content-Disposition": f"inline; filename={filename}"}
+    return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)
 
 @app.post("/api/deliveries")
 def create_delivery(delivery: DeliveryCreate, db: Session = Depends(get_db), user = Depends(get_current_user)):

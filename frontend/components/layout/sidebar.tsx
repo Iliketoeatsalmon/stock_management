@@ -19,13 +19,13 @@ import {
 
 const menuItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
-  { href: "/products", icon: Package, label: "…,¦…,'…,T…,,…1%…,ý" },
-  { href: "/stock-in", icon: ArrowDownToLine, label: "…,ś…,ń…,s…,¦…,'…,T…,,…1%…,ý…1?…,,…1%…,ý" },
-  { href: "/deliveries", icon: Truck, label: "…1ź…,s…,¦…1^…,Ř…,,…,-…,Ř" },
-  { href: "/customers", icon: Building2, label: "…,ť…,1…,?…,,…1%…,ý" },
+  { href: "/products", icon: Package, label: "สินค้า" },
+  { href: "/stock-in", icon: ArrowDownToLine, label: "รับเข้าสินค้า" },
+  { href: "/deliveries", icon: Truck, label: "ใบส่งของ" },
+  { href: "/customers", icon: Building2, label: "ลูกค้า" },
   { href: "/suppliers", icon: Users, label: "Supplier" },
-  { href: "/reports", icon: FileText, label: "…,ś…,ý…,›…,Ř…,ý…,T" },
-  { href: "/users", icon: Settings, label: "…,o…,1…1%…1ź…,S…1%…,Ř…,ý…,T" },
+  { href: "/reports", icon: FileText, label: "รายงาน" },
+  { href: "/users", icon: Settings, label: "ผู้ใช้งาน" },
 ]
 
 export function Sidebar() {
@@ -125,7 +125,7 @@ export function Sidebar() {
             className="flex items-center gap-3 px-4 py-3 w-full text-slate-400 hover:bg-red-600/20 hover:text-red-400 hover:border hover:border-red-600/50 rounded-lg transition-all group font-medium"
           >
             <LogOut className="w-5 h-5" />
-            <span className="flex-1 text-sm">…,-…,-…,?…,^…,ý…,?…,ś…,ř…,s…,s</span>
+            <span className="flex-1 text-sm">ออกจากระบบ</span>
           </button>
         </div>
       </aside>
