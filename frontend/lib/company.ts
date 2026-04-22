@@ -10,6 +10,7 @@ export type CompanySettings = {
   taxId: string
   tel: string
   fax: string
+  email: string
   logo: string
 }
 
@@ -36,6 +37,7 @@ const defaultSettings: CompanySettings = {
   taxId: "TAX ID: -",
   tel: "โทร. -",
   fax: "แฟกซ์ -",
+  email: "-",
   // Use an existing uploaded image as the default delivery logo
   logo: withBasePath("/uploads/a44d90deb308402f8b5cef593da23b87.png"),
 }

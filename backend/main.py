@@ -46,15 +46,18 @@ with engine.begin() as conn:
             tax_id TEXT,
             tel TEXT,
             fax TEXT,
+            email TEXT,
             logo TEXT,
             updated_at TIMESTAMP DEFAULT NOW()
         )
     """))
     conn.execute(text("INSERT INTO company_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING"))
+    conn.execute(text("ALTER TABLE IF EXISTS company_settings ADD COLUMN IF NOT EXISTS email TEXT"))
     conn.execute(text("ALTER TABLE IF EXISTS customers ADD COLUMN IF NOT EXISTS tax_id VARCHAR(30)"))
     conn.execute(text("ALTER TABLE IF EXISTS suppliers ADD COLUMN IF NOT EXISTS tax_id VARCHAR(30)"))
     conn.execute(text("ALTER TABLE IF EXISTS delivery_items ADD COLUMN IF NOT EXISTS note TEXT"))
     conn.execute(text("ALTER TABLE IF EXISTS users ALTER COLUMN email DROP NOT NULL"))
+    conn.execute(text("ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS phone VARCHAR(30)"))
     # Ensure `customers.id` has a default sequence (fix when table was created without SERIAL default)
     try:
         # Ensure sequences/defaults for common tables with SERIAL-like ids
@@ -175,9 +178,17 @@ class LoginRequest(BaseModel):
 class UserCreate(BaseModel):
     username: str
     email: Optional[str] = None
+    phone: Optional[str] = None
     password: str
     full_name: str
     role: str = "staff"
+
+class UserUpdate(BaseModel):
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    password: Optional[str] = None
+    full_name: Optional[str] = None
+    role: Optional[str] = None
 
 class UserStatusUpdate(BaseModel):
     is_active: bool
@@ -189,6 +200,7 @@ class CompanySettingsUpdate(BaseModel):
     taxId: Optional[str] = None
     tel: Optional[str] = None
     fax: Optional[str] = None
+    email: Optional[str] = None
     logo: Optional[str] = None
 
 class ProductCreate(BaseModel):
@@ -313,6 +325,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
             "id": user.id,
             "username": user.username,
             "email": user.email,
+            "phone": user.phone,
             "full_name": user.full_name,
             "role": user.role
         }
@@ -324,6 +337,7 @@ def get_me(user = Depends(get_current_user)):
         "id": user.id,
         "username": user.username,
         "email": user.email,
+        "phone": user.phone,
         "full_name": user.full_name,
         "role": user.role
     }
@@ -709,7 +723,7 @@ def delete_customer(customer_id: int, db: Session = Depends(get_db), user = Depe
 # Users
 @app.get("/api/users")
 def get_users(db: Session = Depends(get_db), user = Depends(get_current_user)):
-    result = db.execute(text("SELECT id, username, email, full_name, role, is_active, created_at FROM users ORDER BY created_at DESC"))
+    result = db.execute(text("SELECT id, username, email, phone, full_name, role, is_active, created_at FROM users ORDER BY created_at DESC"))
     return [dict(row._mapping) for row in result.fetchall()]
 
 @app.post("/api/users")
@@ -719,19 +733,56 @@ def create_user(user_data: UserCreate, db: Session = Depends(get_db), user = Dep
     email_value = user_data.email.strip() if user_data.email else None
     if email_value == "":
         email_value = None
+    phone_value = normalize_optional_str(user_data.phone)
     result = db.execute(text("""
-        INSERT INTO users (username, email, password_hash, full_name, role)
-        VALUES (:username, :email, :password_hash, :full_name, :role)
-        RETURNING id, username, email, full_name, role, is_active
+        INSERT INTO users (username, email, phone, password_hash, full_name, role)
+        VALUES (:username, :email, :phone, :password_hash, :full_name, :role)
+        RETURNING id, username, email, phone, full_name, role, is_active
     """), {
         "username": user_data.username,
         "email": email_value,
+        "phone": phone_value,
         "password_hash": password_hash,
         "full_name": user_data.full_name,
         "role": user_data.role
     })
     db.commit()
     return dict(result.fetchone()._mapping)
+
+@app.put("/api/users/{user_id}")
+def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    require_admin(user)
+    updates = {}
+
+    if data.email is not None:
+        updates["email"] = normalize_optional_str(data.email)
+    if data.phone is not None:
+        updates["phone"] = normalize_optional_str(data.phone)
+    if data.full_name is not None:
+        updates["full_name"] = data.full_name.strip()
+    if data.role is not None:
+        if data.role not in ("admin", "staff"):
+            raise HTTPException(status_code=400, detail="Invalid role")
+        updates["role"] = data.role
+    if data.password:
+        updates["password_hash"] = get_password_hash(data.password)
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    set_clause = ", ".join([f"{key} = :{key}" for key in updates.keys()]) + ", updated_at = :now"
+    params = {**updates, "id": user_id, "now": datetime.now()}
+    result = db.execute(text(f"""
+        UPDATE users
+        SET {set_clause}
+        WHERE id = :id
+        RETURNING id, username, email, phone, full_name, role, is_active
+    """), params)
+    db.commit()
+    row = result.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    return dict(row._mapping)
 
 @app.delete("/api/users/{user_id}")
 def delete_user(user_id: int, db: Session = Depends(get_db), user = Depends(get_current_user)):
@@ -771,6 +822,7 @@ def format_company_settings(row):
             "taxId": "",
             "tel": "",
             "fax": "",
+            "email": "",
             "logo": "",
         }
     return {
@@ -780,13 +832,14 @@ def format_company_settings(row):
         "taxId": row.tax_id or "",
         "tel": row.tel or "",
         "fax": row.fax or "",
+        "email": row.email or "",
         "logo": row.logo or "",
     }
 
 @app.get("/api/company-settings")
 def get_company_settings(db: Session = Depends(get_db)):
     row = db.execute(text("""
-        SELECT name_th, name_en, address, tax_id, tel, fax, logo
+        SELECT name_th, name_en, address, tax_id, tel, fax, email, logo
         FROM company_settings
         WHERE id = 1
     """)).fetchone()
@@ -794,7 +847,7 @@ def get_company_settings(db: Session = Depends(get_db)):
         db.execute(text("INSERT INTO company_settings (id) VALUES (1)"))
         db.commit()
         row = db.execute(text("""
-            SELECT name_th, name_en, address, tax_id, tel, fax, logo
+            SELECT name_th, name_en, address, tax_id, tel, fax, email, logo
             FROM company_settings
             WHERE id = 1
         """)).fetchone()
@@ -808,7 +861,7 @@ def update_company_settings(
 ):
     require_admin(user)
     row = db.execute(text("""
-        SELECT name_th, name_en, address, tax_id, tel, fax, logo
+        SELECT name_th, name_en, address, tax_id, tel, fax, email, logo
         FROM company_settings
         WHERE id = 1
     """)).fetchone()
@@ -820,12 +873,13 @@ def update_company_settings(
         "tax_id": data.taxId if data.taxId is not None else current["taxId"],
         "tel": data.tel if data.tel is not None else current["tel"],
         "fax": data.fax if data.fax is not None else current["fax"],
+        "email": data.email if data.email is not None else current["email"],
         "logo": data.logo if data.logo is not None else current["logo"],
         "updated_at": datetime.now(),
     }
     db.execute(text("""
-        INSERT INTO company_settings (id, name_th, name_en, address, tax_id, tel, fax, logo, updated_at)
-        VALUES (1, :name_th, :name_en, :address, :tax_id, :tel, :fax, :logo, :updated_at)
+        INSERT INTO company_settings (id, name_th, name_en, address, tax_id, tel, fax, email, logo, updated_at)
+        VALUES (1, :name_th, :name_en, :address, :tax_id, :tel, :fax, :email, :logo, :updated_at)
         ON CONFLICT (id) DO UPDATE SET
             name_th = EXCLUDED.name_th,
             name_en = EXCLUDED.name_en,
@@ -833,6 +887,7 @@ def update_company_settings(
             tax_id = EXCLUDED.tax_id,
             tel = EXCLUDED.tel,
             fax = EXCLUDED.fax,
+            email = EXCLUDED.email,
             logo = EXCLUDED.logo,
             updated_at = EXCLUDED.updated_at
     """), payload)
@@ -844,6 +899,7 @@ def update_company_settings(
         "taxId": payload["tax_id"] or "",
         "tel": payload["tel"] or "",
         "fax": payload["fax"] or "",
+        "email": payload["email"] or "",
         "logo": payload["logo"] or "",
     }
 
@@ -971,7 +1027,13 @@ def manual_stock_in(data: ManualStockIn, db: Session = Depends(get_db), user = D
 
 # Deliveries (Stock OUT)
 @app.get("/api/deliveries")
-def get_deliveries(status: Optional[str] = None, db: Session = Depends(get_db), user = Depends(get_current_user)):
+def get_deliveries(
+    status: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
+):
     query = """
         SELECT d.*, c.name as customer_name, 
             u1.full_name as created_by_name,
@@ -982,9 +1044,18 @@ def get_deliveries(status: Optional[str] = None, db: Session = Depends(get_db), 
         LEFT JOIN users u2 ON d.confirmed_by = u2.id
     """
     params = {}
+    conditions = []
     if status:
-        query += " WHERE d.status = :status"
+        conditions.append("d.status = :status")
         params["status"] = status
+    if start_date:
+        conditions.append("d.delivery_date >= :start_date")
+        params["start_date"] = start_date
+    if end_date:
+        conditions.append("d.delivery_date <= :end_date")
+        params["end_date"] = end_date
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
     query += " ORDER BY d.created_at DESC"
     
     result = db.execute(text(query), params)
@@ -995,7 +1066,7 @@ def get_delivery(delivery_id: int, db: Session = Depends(get_db), user = Depends
     result = db.execute(text("""
         SELECT d.*, c.name as customer_name, c.address as customer_address,
             c.phone as customer_phone, c.contact_person as customer_contact_person,
-            u1.full_name as created_by_name
+            u1.full_name as created_by_name, u1.phone as created_by_phone
         FROM deliveries d
         LEFT JOIN customers c ON d.customer_id = c.id
         LEFT JOIN users u1 ON d.created_by = u1.id

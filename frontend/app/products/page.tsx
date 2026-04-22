@@ -22,6 +22,7 @@ interface Product {
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [search, setSearch] = useState("")
+  const [sortOrder, setSortOrder] = useState<"none" | "code-asc" | "code-desc">("none")
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Product | null>(null)
   const [editForm, setEditForm] = useState({
@@ -38,6 +39,28 @@ export default function ProductsPage() {
   useEffect(() => {
     loadProducts()
   }, [search])
+
+  const sortedProducts = (() => {
+    const list = [...products]
+    if (sortOrder === "none") return list
+    const factor = sortOrder === "code-asc" ? 1 : -1
+    const parseCode = (code: string) => {
+      const matches = code.match(/\d+/g)
+      if (!matches) return null
+      const num = Number(matches.join(""))
+      return Number.isNaN(num) ? null : num
+    }
+    list.sort((a, b) => {
+      const aNum = parseCode(a.code)
+      const bNum = parseCode(b.code)
+      if (aNum !== null && bNum !== null && aNum !== bNum) {
+        return (aNum - bNum) * factor
+      }
+      const byText = a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: "base" })
+      return byText * factor
+    })
+    return list
+  })()
 
   const loadProducts = async () => {
     try {
@@ -123,15 +146,26 @@ export default function ProductsPage() {
           <main className="flex-1 p-4 sm:p-6">
             {/* Actions */}
             <div className="flex items-center justify-between mb-6">
-              <div className="relative w-96">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="ค้นหาสินค้า..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 placeholder-slate-500 bg-white"
-                />
+              <div className="flex items-center gap-3">
+                <div className="relative w-96">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="ค้นหาสินค้า..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 placeholder-slate-500 bg-white"
+                  />
+                </div>
+                <select
+                  value={sortOrder}
+                  onChange={(e) => setSortOrder(e.target.value as "none" | "code-asc" | "code-desc")}
+                  className="px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm text-gray-700"
+                >
+                  <option value="none">เรียงตามรหัสสินค้า</option>
+                  <option value="code-asc">เลขน้อยไปมาก</option>
+                  <option value="code-desc">เลขมากไปน้อย</option>
+                </select>
               </div>
               <Link
                 href="/products/new"
@@ -164,7 +198,7 @@ export default function ProductsPage() {
                         <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto"></div>
                       </td>
                     </tr>
-                  ) : products.length === 0 ? (
+                  ) : sortedProducts.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
                         <Package className="w-12 h-12 mx-auto mb-2 text-gray-300" />
@@ -172,7 +206,7 @@ export default function ProductsPage() {
                       </td>
                     </tr>
                   ) : (
-                    products.map((product) => (
+                    sortedProducts.map((product) => (
                       <tr key={product.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4">
                           {product.image_url ? (

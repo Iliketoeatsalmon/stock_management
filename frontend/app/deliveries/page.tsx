@@ -7,6 +7,7 @@ import { api } from "@/lib/api"
 import { Plus, Eye, Truck } from "lucide-react"
 import Link from "next/link"
 import { format } from "date-fns"
+import { DatePicker } from "@/components/ui/date-picker"
 
 interface Delivery {
   id: number
@@ -21,14 +22,24 @@ interface Delivery {
 export default function DeliveriesPage() {
   const [deliveries, setDeliveries] = useState<Delivery[]>([])
   const [loading, setLoading] = useState(true)
+  const [dateFilter, setDateFilter] = useState({
+    start_date: "",
+    end_date: "",
+  })
 
   useEffect(() => {
     loadDeliveries()
   }, [])
 
-  const loadDeliveries = async () => {
+  const loadDeliveries = async (overrideFilter?: { start_date: string; end_date: string }) => {
+    const activeFilter = overrideFilter || dateFilter
     try {
-      const result = await api.get("/deliveries")
+      setLoading(true)
+      const params = new URLSearchParams()
+      if (activeFilter.start_date) params.append("start_date", activeFilter.start_date)
+      if (activeFilter.end_date) params.append("end_date", activeFilter.end_date)
+      const endpoint = params.toString() ? `/deliveries?${params.toString()}` : "/deliveries"
+      const result = await api.get(endpoint)
       setDeliveries(result)
     } catch (err) {
       console.error("Failed to load deliveries:", err)
@@ -66,6 +77,45 @@ export default function DeliveriesPage() {
               <Plus className="w-5 h-5" />
               สร้างใบส่งของ
             </Link>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Start date</label>
+                <DatePicker
+                  value={dateFilter.start_date}
+                  onChange={(value) => setDateFilter({ ...dateFilter, start_date: value })}
+                  className="px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">End date</label>
+                <DatePicker
+                  value={dateFilter.end_date}
+                  onChange={(value) => setDateFilter({ ...dateFilter, end_date: value })}
+                  className="px-3 py-2"
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => loadDeliveries()}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  Search
+                </button>
+                <button
+                  onClick={() => {
+                    const cleared = { start_date: "", end_date: "" }
+                    setDateFilter(cleared)
+                    loadDeliveries(cleared)
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">

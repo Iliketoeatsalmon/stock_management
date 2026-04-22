@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
 import { api } from "@/lib/api"
+import { withBasePath } from "@/lib/base-path"
 import { fetchCompanySettings, loadCompanySettings } from "@/lib/company"
 import { ArrowLeft, CheckCircle, Printer, Trash2, Plus, Minus } from "lucide-react"
 import Link from "next/link"
@@ -52,7 +53,7 @@ export default function DeliveryDetailPage() {
   }
 
   const handlePrint = () => {
-    window.print()
+    window.open(withBasePath(`/deliveries/${params.id}/print`), "_blank")
   }
 
   const handleDelete = async () => {
@@ -178,6 +179,30 @@ export default function DeliveryDetailPage() {
     )
   }
 
+  const sortItemsByCode = (items: any[]) => {
+    const list = [...items]
+    const parseCode = (code: string) => {
+      const matches = code?.match(/\d+/g)
+      if (!matches) return null
+      const num = Number(matches.join(""))
+      return Number.isNaN(num) ? null : num
+    }
+    list.sort((a, b) => {
+      const aNum = parseCode(a.product_code || "")
+      const bNum = parseCode(b.product_code || "")
+      if (aNum !== null && bNum !== null && aNum !== bNum) {
+        return aNum - bNum
+      }
+      return String(a.product_code || "").localeCompare(String(b.product_code || ""), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      })
+    })
+    return list
+  }
+
+  const displayItems = isDraft ? editItems : sortItemsByCode(delivery.items || [])
+
   return (
     <div className="flex min-h-screen bg-gray-50">
       <div className="print:hidden">
@@ -196,15 +221,15 @@ export default function DeliveryDetailPage() {
               .page { box-shadow: none !important; border: none !important; }
               * { color: #000 !important; }
               /* Push the signature down on short documents (but still allow long tables to expand) */
-              .print-table { min-height: 0; }
-              .print-area { font-size: 8px; line-height: 1; }
+              .print-area { font-size: 8px; line-height: 1; display: flex; flex-direction: column; min-height: 285mm !important; }
+              .print-table { min-height: 0; flex: 1 1 auto; }
               .print-table th, .print-table td { padding: 1px !important; }
               .print-area .leading-relaxed { line-height: 1.2 !important; }
               .print-area .p-3 { padding: 4px !important; }
               .print-area .p-2 { padding: 3px !important; }
               .print-area .text-base { font-size: 10px !important; }
               .print-area .space-y-1 > :not([hidden]) ~ :not([hidden]) { margin-top: 2px !important; }
-              .signature-block { margin-top: 0 !important; }
+              .signature-block { margin-top: auto !important; }
               thead { display: table-header-group; }
               tfoot { display: table-footer-group; }
               .signature-block { break-inside: avoid; page-break-inside: avoid; }
@@ -247,7 +272,7 @@ export default function DeliveryDetailPage() {
             </div>
           </div>
 
-          <div className="page print-area bg-white rounded-xl border border-gray-200 p-6 print:p-0 print:rounded-none print:border print:text-xs">
+          <div className="page print-area bg-white rounded-xl border border-gray-200 p-6 print:p-0 print:rounded-none print:border print:text-xs flex flex-col min-h-[270mm]">
             {/* Header */}
             <div className="border border-gray-400">
               <div className="flex">
@@ -260,8 +285,8 @@ export default function DeliveryDetailPage() {
                   <div>{companyInfo.address}</div>
                   <div>{companyInfo.taxId}</div>
                   <div>{companyInfo.tel}</div>
+                  <div>Email: {companyInfo.email}</div>
                   <div>{companyInfo.fax}</div>
-                  <div className="mt-1 text-xs">ผู้ทำรายการ: {delivery.created_by_name || "-"}</div>
                 </div>
               </div>
 
@@ -269,8 +294,8 @@ export default function DeliveryDetailPage() {
                 <div className="p-3 space-y-1 border-r border-gray-400">
                   <div><strong>Company:</strong> {delivery.customer_name || "-"}</div>
                   <div><strong>Delivery to:</strong> {delivery.customer_name || "-"}</div>
-                  <div><strong>Contact:</strong> {delivery.customer_contact_person || "-"}</div>
                   <div><strong>Address:</strong> {delivery.customer_address || "-"}</div>
+                  <div><strong>Contact:</strong> {delivery.customer_contact_person || "-"}</div>
                   <div><strong>Tel:</strong> {delivery.customer_phone || "-"}</div>
                   <div><strong>Fax:</strong> -</div>
                 </div>
@@ -278,15 +303,11 @@ export default function DeliveryDetailPage() {
                   <div><strong>Date:</strong> {format(new Date(delivery.delivery_date), "dd/MM/yyyy")}</div>
                   <div><strong>No:</strong> {delivery.delivery_number}</div>
                   <div>
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-medium ${
-                        delivery.status === "confirmed"
-                          ? "bg-green-100 text-green-700"
-                          : delivery.status === "cancelled"
-                            ? "bg-red-100 text-red-700"
-                            : "bg-yellow-100 text-yellow-700"
-                      } print:bg-white print:text-black print:border print:border-gray-400`}
-                    >
+                    <strong>ผู้ทำรายการ:</strong> {delivery.created_by_name || "-"}
+                    {delivery.created_by_phone ? ` (${delivery.created_by_phone})` : ""}
+                  </div>
+                  <div className="mt-1">
+                    <span className="inline-flex items-center px-2 py-0.5 text-[10px] text-gray-500 border border-gray-300 rounded-full opacity-70 print:bg-white print:text-black print:border-gray-400">
                       {delivery.status === "confirmed"
                         ? "ยืนยันแล้ว"
                         : delivery.status === "cancelled"
@@ -298,6 +319,11 @@ export default function DeliveryDetailPage() {
               </div>
             </div>
 
+            <div className="border border-gray-400 border-t-0 p-3 text-sm print:text-xs">
+              <div className="text-xs text-gray-500 mb-1">หมายเหตุ</div>
+              <div className="text-gray-900 whitespace-pre-wrap">{delivery.notes || "-"}</div>
+            </div>
+
             {/* Items table */}
             <div className="print-table">
             <div className="border border-gray-400 border-b-0 px-3 py-2 font-semibold text-sm print:text-xs bg-gray-50 text-center">
@@ -307,6 +333,7 @@ export default function DeliveryDetailPage() {
               <thead className="bg-gray-100">
                 <tr>
                   <th className="border border-gray-400 p-2 w-12">ลำดับ</th>
+                  <th className="border border-gray-400 p-2 w-24">รหัสสินค้า</th>
                   <th className="border border-gray-400 p-2">รายการสินค้า</th>
                   <th className="border border-gray-400 p-2 w-16">จำนวน</th>
                   <th className="border border-gray-400 p-2 w-16">หน่วย</th>
@@ -314,7 +341,7 @@ export default function DeliveryDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {(isDraft ? editItems : delivery.items || []).map((item: any, index: number) => (
+                {displayItems.map((item: any, index: number) => (
                   <tr key={item.id || index}>
                     <td className="border border-gray-300 p-2 text-center align-middle">
                       <div className="flex items-center justify-center gap-2">
@@ -329,6 +356,9 @@ export default function DeliveryDetailPage() {
                           </button>
                         )}
                       </div>
+                    </td>
+                    <td className="border border-gray-300 p-2 text-center align-middle">
+                      {item.product_code || "-"}
                     </td>
                     <td className="border border-gray-300 p-2 align-top">
                       {isDraft ? (
@@ -345,14 +375,10 @@ export default function DeliveryDetailPage() {
                               </option>
                             ))}
                           </select>
-                          <div className="text-xs text-gray-500">
-                            {item.product_code || "-"} {item.unit ? `(${item.unit})` : ""}
-                          </div>
                         </div>
                       ) : (
                         <div>
                           <div className="font-medium text-gray-900">{item.product_name}</div>
-                          <div className="text-xs text-gray-500">{item.product_code}</div>
                         </div>
                       )}
                     </td>
@@ -392,7 +418,7 @@ export default function DeliveryDetailPage() {
             </table>
             </div>
 
-            <div className="signature-block text-sm print:text-xs mt-0 print:mt-0">
+            <div className="signature-block text-sm print:text-xs mt-0 print:mt-auto pt-4">
               <div className="grid grid-cols-2 text-center gap-2 print:gap-0">
                 <div className="p-3 print:p-0">
                   ส่วนของลูกค้า/ผู้รับสินค้า<br />

@@ -13,6 +13,7 @@ interface UserData {
   id: number
   username: string
   email?: string | null
+  phone?: string | null
   full_name: string
   role: string
   is_active: boolean
@@ -22,7 +23,16 @@ export default function UsersPage() {
   const [users, setUsers] = useState<UserData[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
-  const [form, setForm] = useState({ username: "", email: "", password: "", full_name: "", role: "staff" })
+  const [form, setForm] = useState({
+    username: "",
+    email: "",
+    phone: "",
+    password: "",
+    full_name: "",
+    role: "staff",
+  })
+  const [isEditing, setIsEditing] = useState(false)
+  const [editingUserId, setEditingUserId] = useState<number | null>(null)
   const [currentRole, setCurrentRole] = useState<string>("")
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
   const [showCompany, setShowCompany] = useState(false)
@@ -70,9 +80,21 @@ export default function UsersPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await api.post("/users", form)
+      if (isEditing && editingUserId) {
+        await api.put(`/users/${editingUserId}`, {
+          email: form.email,
+          phone: form.phone,
+          full_name: form.full_name,
+          role: form.role,
+          password: form.password || undefined,
+        })
+      } else {
+        await api.post("/users", form)
+      }
       setShowModal(false)
-      setForm({ username: "", email: "", password: "", full_name: "", role: "staff" })
+      setForm({ username: "", email: "", phone: "", password: "", full_name: "", role: "staff" })
+      setIsEditing(false)
+      setEditingUserId(null)
       loadUsers()
     } catch (err) {
       alert("เพิ่มผู้ใช้งานไม่สำเร็จ")
@@ -97,7 +119,12 @@ export default function UsersPage() {
                   ตั้งค่าบริษัท
                 </button>
                 <button
-                  onClick={() => setShowModal(true)}
+                  onClick={() => {
+                    setIsEditing(false)
+                    setEditingUserId(null)
+                    setForm({ username: "", email: "", phone: "", password: "", full_name: "", role: "staff" })
+                    setShowModal(true)
+                  }}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
                   <Plus className="w-5 h-5" />
@@ -138,7 +165,7 @@ export default function UsersPage() {
                     <div>
                       <p className="font-medium text-gray-900">{user.full_name}</p>
                       <p className="text-sm text-gray-500">
-                        @{user.username} - {user.email || "-"}
+                        @{user.username} - {user.email || "-"} - {user.phone || "-"}
                       </p>
                     </div>
                   </div>
@@ -157,6 +184,26 @@ export default function UsersPage() {
                     >
                       {user.is_active ? "Active" : "Inactive"}
                     </span>
+                    {currentRole === "admin" && (
+                      <button
+                        onClick={() => {
+                          setIsEditing(true)
+                          setEditingUserId(user.id)
+                          setForm({
+                            username: user.username,
+                            email: user.email || "",
+                            phone: user.phone || "",
+                            password: "",
+                            full_name: user.full_name,
+                            role: user.role,
+                          })
+                          setShowModal(true)
+                        }}
+                        className="px-3 py-1 text-xs rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
+                      >
+                        Edit
+                      </button>
+                    )}
                     {currentRole === "admin" && (
                       <button
                         onClick={async () => {
@@ -200,7 +247,8 @@ export default function UsersPage() {
                   value={form.username}
                   onChange={(e) => setForm({ ...form, username: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-slate-900 placeholder-slate-500 bg-white"
-                  required
+                  required={!isEditing}
+                  disabled={isEditing}
                 />
               </div>
               <div>
@@ -223,13 +271,24 @@ export default function UsersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">รหัสผ่าน *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                <input
+                  type="text"
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-slate-900 placeholder-slate-500 bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {isEditing ? "New Password (optional)" : "Password *"}
+                </label>
                 <input
                   type="password"
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-slate-900 placeholder-slate-500 bg-white"
-                  required
+                  required={!isEditing}
                 />
               </div>
               <div>
@@ -246,7 +305,11 @@ export default function UsersPage() {
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => setShowModal(false)}
+                  onClick={() => {
+                    setShowModal(false)
+                    setIsEditing(false)
+                    setEditingUserId(null)
+                  }}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg"
                 >
                   ยกเลิก
@@ -343,6 +406,14 @@ export default function UsersPage() {
                   />
                 </div>
                 <div>
+                  <label className="block text-gray-700 mb-1">Email</label>
+                  <input
+                    value={companyForm.email}
+                    onChange={(e) => setCompanyForm({ ...companyForm, email: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div className="col-span-2">
                   <label className="block text-gray-700 mb-1">โลโก้บริษัท (ถ้ามี)</label>
                   <div className="flex items-center gap-3">
                     <input
