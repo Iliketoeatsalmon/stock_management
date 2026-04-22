@@ -10,10 +10,11 @@ services:
       POSTGRES_PASSWORD: stockpass123
       POSTGRES_DB: stock_management
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/sql:/docker-entrypoint-initdb.d
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U stockadmin -d stock_management"]
       interval: 5s
@@ -29,13 +30,13 @@ services:
       DATABASE_URL: postgresql://stockadmin:stockpass123@postgres:5432/stock_management
       SECRET_KEY: your-super-secret-key-change-in-production
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
-      - ./backend:/app
-      - ./uploads:/app/uploads
+      - uploads_data:/app/uploads
+    restart: unless-stopped
 
   frontend:
     build:
@@ -43,12 +44,14 @@ services:
       dockerfile: Dockerfile
     container_name: stock_web
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_API_BASE_URL: /api
       NEXT_PUBLIC_BASE_PATH: /stock
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - backend
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+  uploads_data:
