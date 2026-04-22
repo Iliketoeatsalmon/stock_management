@@ -1,13 +1,4 @@
 node_modules
 .next
-dist
-out
-coverage
-*.log
-.DS_Store
-.git
-.gitignore
-tmp
 npm-debug.log*
-yarn-error.log*
 pnpm-debug.log*

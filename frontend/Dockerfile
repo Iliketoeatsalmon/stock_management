@@ -18,6 +18,7 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PUBLIC_API_BASE_URL=/api
+ENV BACKEND_INTERNAL_URL=http://backend:8000
 
 RUN pnpm run build
 
@@ -33,6 +34,7 @@ RUN adduser --system --uid 1001 nextjs
 
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
 
 USER nextjs
 
@@ -40,5 +42,7 @@ EXPOSE 3000
 
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
+ENV NEXT_PUBLIC_API_BASE_URL=/api
+ENV BACKEND_INTERNAL_URL=http://backend:8000
 
 CMD ["node", "server.js"]
