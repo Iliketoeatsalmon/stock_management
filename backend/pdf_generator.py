@@ -1,12 +1,10 @@
 import base64
-import io
 import os
-import unicodedata
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse, unquote
+from urllib.parse import unquote, urlparse
 
-from weasyprint import HTML, CSS
+from weasyprint import CSS, HTML
 from weasyprint.text.fonts import FontConfiguration
 
 PAGE_SIZE = 20
@@ -14,10 +12,6 @@ PAGE_SIZE = 20
 FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "fonts", "NotoSansThai-Regular.ttf")
 UPLOADS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "uploads"))
 
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 def generate_delivery_pdf(delivery: Dict[str, Any], company: Dict[str, Any]) -> bytes:
     items = sorted(delivery.get("items", []) or [], key=_product_code_sort_key)
@@ -28,10 +22,6 @@ def generate_delivery_pdf(delivery: Dict[str, Any], company: Dict[str, Any]) -> 
     html_str = _build_html(delivery, company, pages)
     return HTML(string=html_str).write_pdf(stylesheets=[css], font_config=font_config)
 
-
-# ---------------------------------------------------------------------------
-# CSS
-# ---------------------------------------------------------------------------
 
 def _build_css(font_config: FontConfiguration) -> CSS:
     if os.path.isfile(FONT_PATH):
@@ -79,66 +69,108 @@ body {{
     page-break-after: avoid;
 }}
 
-/* ─── Outer border ───────────────────────────── */
 .sheet {{
     border: 0.5pt solid #a0a0a0;
     width: 100%;
 }}
 
-/* ─── Generic 2-col table (header/info/signature) ── */
 .row-table {{
     width: 100%;
     border-collapse: collapse;
     table-layout: fixed;
 }}
+
 .row-table > tbody > tr > td {{
     vertical-align: top;
     border-bottom: 0.5pt solid #a0a0a0;
 }}
 
-/* ─── Header: logo + company ────────────────── */
 .header-top td {{
-    height: 34mm;
-    vertical-align: middle;
+    vertical-align: top;
 }}
+
 .header-logo {{
-    width: 33%;
+    width: 26%;
     border-right: 0.5pt solid #a0a0a0;
     text-align: center;
-    padding: 3mm;
+    padding: 4mm 3mm;
+    vertical-align: middle !important;
 }}
+
 .header-logo img {{
-    max-width: 100%;
-    max-height: 28mm;
+    display: block;
+    width: 100%;
+    max-width: 56mm;
+    max-height: 30mm;
+    height: auto;
+    margin: 0 auto;
+    object-fit: contain;
 }}
+
 .header-logo .no-logo {{
     color: #aaa;
     font-size: 8pt;
 }}
+
 .header-company {{
-    padding: 4mm;
-    font-size: 8.5pt;
+    padding: 4mm 5mm 3mm;
+    font-size: 8pt;
+    line-height: 1.35;
     vertical-align: top !important;
 }}
-.header-company .company-name {{
-    font-size: 10pt;
+
+.header-company .company-name-th {{
+    font-size: 10.5pt;
     font-weight: bold;
     margin-bottom: 1mm;
 }}
 
-/* ─── Info block ─────────────────────────────── */
-.header-info td {{
-    height: 32mm;
-    padding: 3mm 4mm;
-    font-size: 8.5pt;
-    line-height: 1.5;
-    width: 50%;
+.header-company .company-name-en {{
+    font-size: 9.5pt;
+    font-weight: bold;
+    margin-bottom: 1.2mm;
 }}
+
+.header-company .company-detail {{
+    margin-bottom: 0.8mm;
+}}
+
+.header-info td {{
+    padding: 0;
+    font-size: 8.25pt;
+    line-height: 1.45;
+    width: 50%;
+    vertical-align: top;
+}}
+
 .header-info .info-left {{
     border-right: 0.5pt solid #a0a0a0;
 }}
 
-/* ─── Notes ──────────────────────────────────── */
+.info-panel {{
+    min-height: 28mm;
+    padding: 3mm 4mm;
+}}
+
+.info-row {{
+    width: 100%;
+    margin-bottom: 1.2mm;
+}}
+
+.info-label {{
+    display: inline-block;
+    width: 23mm;
+    font-weight: bold;
+    vertical-align: top;
+}}
+
+.info-value {{
+    display: inline-block;
+    width: calc(100% - 24mm);
+    vertical-align: top;
+    word-break: break-word;
+}}
+
 .notes-block {{
     border-bottom: 0.5pt solid #a0a0a0;
     padding: 2mm 4mm;
@@ -146,17 +178,18 @@ body {{
     min-height: 10mm;
 }}
 
-/* ─── Title ──────────────────────────────────── */
 .title-row {{
     border-bottom: 0.5pt solid #a0a0a0;
     position: relative;
     text-align: center;
     padding: 1.5mm 0;
 }}
+
 .title-row .doc-title {{
     font-size: 10pt;
     font-weight: bold;
 }}
+
 .title-row .status-badge {{
     position: absolute;
     right: 4mm;
@@ -169,13 +202,13 @@ body {{
     background: #f5f5f5;
 }}
 
-/* ─── Table ──────────────────────────────────── */
 .items-table {{
     width: 100%;
     border-collapse: collapse;
     font-size: 8pt;
     table-layout: fixed;
 }}
+
 .items-table th {{
     background: #f5f5f5;
     border: 0.35pt solid #a6acb3;
@@ -185,6 +218,7 @@ body {{
     height: 7mm;
     font-size: 8pt;
 }}
+
 .items-table td {{
     border: 0.35pt solid #a6acb3;
     padding: 1mm 1.5mm;
@@ -193,45 +227,79 @@ body {{
     font-size: 8pt;
     overflow: hidden;
 }}
-.items-table td.center {{ text-align: center; }}
-.col-no    {{ width: 12mm; }}
-.col-code  {{ width: 24mm; }}
-.col-qty   {{ width: 16mm; }}
-.col-unit  {{ width: 16mm; }}
-.col-note  {{ width: 30mm; }}
 
-/* ─── Signature ──────────────────────────────── */
+.items-table td.center {{
+    text-align: center;
+}}
+
+.col-no {{
+    width: 12mm;
+}}
+
+.col-code {{
+    width: 24mm;
+}}
+
+.col-qty {{
+    width: 16mm;
+}}
+
+.col-unit {{
+    width: 16mm;
+}}
+
+.col-note {{
+    width: 30mm;
+}}
+
 .signature-block {{
     width: 100%;
     border-collapse: collapse;
     border-top: 0.5pt solid #a0a0a0;
     table-layout: fixed;
 }}
+
 .signature-block td {{
     width: 50%;
-    height: 20mm;
-    text-align: center;
-    vertical-align: middle;
+    height: 28mm;
+    vertical-align: top;
     font-size: 8.5pt;
-    padding: 2mm;
+    padding: 3mm 4mm;
 }}
+
 .signature-block .sig-left {{
     border-right: 0.5pt solid #a0a0a0;
 }}
-.sig-line {{
-    color: #888;
-    letter-spacing: 1pt;
-    display: block;
-    margin-top: 2mm;
+
+.signature-panel {{
+    text-align: center;
 }}
 
+.signature-title {{
+    display: block;
+    font-weight: bold;
+    margin-bottom: 9mm;
+}}
+
+.sig-line {{
+    display: block;
+    margin-top: 1.5mm;
+}}
+
+.sig-field {{
+    display: inline-block;
+    min-width: 42mm;
+    border-bottom: 0.5pt solid #888;
+    height: 4mm;
+    vertical-align: bottom;
+}}
+
+.sig-date {{
+    letter-spacing: 0.2pt;
+}}
 """
     return CSS(string=css_string, font_config=font_config)
 
-
-# ---------------------------------------------------------------------------
-# HTML builder
-# ---------------------------------------------------------------------------
 
 def _build_html(delivery: Dict[str, Any], company: Dict[str, Any], pages: List[List]) -> str:
     logo_html = _logo_html(company.get("logo"))
@@ -239,7 +307,6 @@ def _build_html(delivery: Dict[str, Any], company: Dict[str, Any], pages: List[L
     info_html = _info_html(delivery)
     notes = _esc(delivery.get("notes") or "-")
     status_label = _status_label(delivery.get("status"))
-    total_pages = len(pages)
 
     page_blocks = ""
     for page_index, page_items in enumerate(pages):
@@ -277,14 +344,18 @@ def _build_html(delivery: Dict[str, Any], company: Dict[str, Any], pages: List[L
     <table class="signature-block">
       <tr>
         <td class="sig-left">
-          <span>ส่วนของลูกค้า / ผู้รับสินค้า</span>
-          <span class="sig-line">. . . . . . . . . . . . . . . . . .</span>
-          <span class="sig-line">. . . . / . . . . / . . . .</span>
+          <div class="signature-panel">
+            <span class="signature-title">ส่วนของลูกค้า / ผู้รับสินค้า</span>
+            <span class="sig-line">ลงชื่อ <span class="sig-field"></span></span>
+            <span class="sig-line sig-date">วันที่ <span class="sig-field"></span></span>
+          </div>
         </td>
         <td>
-          <span>ส่วนของบริษัท / ผู้ส่งสินค้า</span>
-          <span class="sig-line">. . . . . . . . . . . . . . . . . .</span>
-          <span class="sig-line">. . . . / . . . . / . . . .</span>
+          <div class="signature-panel">
+            <span class="signature-title">ส่วนของบริษัท / ผู้ส่งสินค้า</span>
+            <span class="sig-line">ลงชื่อ <span class="sig-field"></span></span>
+            <span class="sig-line sig-date">วันที่ <span class="sig-field"></span></span>
+          </div>
         </td>
       </tr>
     </table>
@@ -334,15 +405,15 @@ def _company_html(company: Dict[str, Any]) -> str:
     tax_label = tax_id if tax_id.lower().startswith("tax id") else f"Tax ID: {tax_id or '-'}"
 
     parts = []
-    if name_en:
-        parts.append(f'<div class="company-name">{name_en}</div>')
     if name_th:
-        parts.append(f'<div class="company-name">{name_th}</div>')
+        parts.append(f'<div class="company-name-th">{name_th}</div>')
+    if name_en:
+        parts.append(f'<div class="company-name-en">{name_en}</div>')
     if address:
-        parts.append(f"<div>{address}</div>")
-    parts.append(f"<div>{_esc(tax_label)}</div>")
-    parts.append(f"<div>Tel: {tel} &nbsp; Fax: {fax}</div>")
-    parts.append(f"<div>Email: {email}</div>")
+        parts.append(f'<div class="company-detail">{address}</div>')
+    parts.append(f'<div class="company-detail">{_esc(tax_label)}</div>')
+    parts.append(f'<div class="company-detail">Tel: {tel} &nbsp; Fax: {fax}</div>')
+    parts.append(f'<div class="company-detail">Email: {email}</div>')
     return "".join(parts)
 
 
@@ -358,16 +429,20 @@ def _info_html(delivery: Dict[str, Any]) -> str:
     created_by_label = _esc(f"{created_by} ({created_by_phone})" if created_by_phone else created_by)
 
     left = f"""<td class="info-left">
-  <div>ส่งของถึง: {customer_name}</div>
-  <div>ที่อยู่: {address}</div>
-  <div>ผู้ติดต่อ: {contact}</div>
-  <div>โทรศัพท์: {phone}</div>
+  <div class="info-panel">
+    <div class="info-row"><span class="info-label">ส่งของถึง</span><span class="info-value">{customer_name}</span></div>
+    <div class="info-row"><span class="info-label">ที่อยู่</span><span class="info-value">{address}</span></div>
+    <div class="info-row"><span class="info-label">ผู้ติดต่อ</span><span class="info-value">{contact}</span></div>
+    <div class="info-row"><span class="info-label">โทรศัพท์</span><span class="info-value">{phone}</span></div>
+  </div>
 </td>"""
 
     right = f"""<td class="info-right">
-  <div>วันที่: {delivery_date}</div>
-  <div>เลขที่: {delivery_number}</div>
-  <div>ผู้ทำรายการ: {created_by_label}</div>
+  <div class="info-panel">
+    <div class="info-row"><span class="info-label">วันที่</span><span class="info-value">{delivery_date}</span></div>
+    <div class="info-row"><span class="info-label">เลขที่</span><span class="info-value">{delivery_number}</span></div>
+    <div class="info-row"><span class="info-label">ผู้ทำรายการ</span><span class="info-value">{created_by_label}</span></div>
+  </div>
 </td>"""
 
     return left + right
@@ -400,6 +475,7 @@ def _logo_as_data_uri(logo_url: str) -> Optional[str]:
 
     if logo_url.startswith("http://") or logo_url.startswith("https://"):
         from urllib.request import urlopen
+
         with urlopen(logo_url, timeout=5) as resp:
             data = resp.read()
             content_type = resp.headers.get("Content-Type", "image/png").split(";")[0]
@@ -423,14 +499,10 @@ def _resolve_local_path(url: str) -> Optional[str]:
     return None
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 def _chunk(items: List, size: int) -> List[List]:
     if not items:
         return [[]]
-    return [items[i: i + size] for i in range(0, len(items), size)]
+    return [items[i : i + size] for i in range(0, len(items), size)]
 
 
 def _format_date(value: Any) -> str:
@@ -456,8 +528,10 @@ def _product_code_sort_key(item: Dict[str, Any]) -> tuple:
 
 
 def _esc(text: str) -> str:
-    return (str(text)
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace('"', "&quot;"))
+    return (
+        str(text)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
