@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(docker build *)",
+      "Bash(docker run --rm -v /tmp:/out stock_backend_test python -c ' *)",
+      "Bash(rm -f /tmp/test_delivery-*.png)",
+      "Bash(docker run *)"
+    ]
+  }
+}

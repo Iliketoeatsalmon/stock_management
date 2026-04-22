@@ -49,7 +49,12 @@ def _build_css(font_config: FontConfiguration) -> CSS:
 
 @page {{
     size: A4 portrait;
-    margin: 8mm;
+    margin: 8mm 8mm 10mm 8mm;
+    @bottom-right {{
+        content: "หน้า " counter(page) "/" counter(pages);
+        font-size: 7.5pt;
+        color: #888;
+    }}
 }}
 
 * {{
@@ -78,39 +83,42 @@ body {{
 .sheet {{
     border: 0.5pt solid #a0a0a0;
     width: 100%;
-    height: 277mm;
-    display: flex;
-    flex-direction: column;
+}}
+
+/* ─── Generic 2-col table (header/info/signature) ── */
+.row-table {{
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}}
+.row-table > tbody > tr > td {{
+    vertical-align: top;
+    border-bottom: 0.5pt solid #a0a0a0;
 }}
 
 /* ─── Header: logo + company ────────────────── */
-.header-top {{
-    display: flex;
-    border-bottom: 0.5pt solid #a0a0a0;
-    height: 40mm;
-    flex-shrink: 0;
+.header-top td {{
+    height: 34mm;
+    vertical-align: middle;
 }}
 .header-logo {{
     width: 33%;
     border-right: 0.5pt solid #a0a0a0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    text-align: center;
     padding: 3mm;
 }}
 .header-logo img {{
     max-width: 100%;
-    max-height: 34mm;
-    object-fit: contain;
+    max-height: 28mm;
 }}
 .header-logo .no-logo {{
     color: #aaa;
     font-size: 8pt;
 }}
 .header-company {{
-    flex: 1;
-    padding: 4mm 4mm 4mm 4mm;
+    padding: 4mm;
     font-size: 8.5pt;
+    vertical-align: top !important;
 }}
 .header-company .company-name {{
     font-size: 10pt;
@@ -119,40 +127,31 @@ body {{
 }}
 
 /* ─── Info block ─────────────────────────────── */
-.header-info {{
-    display: flex;
-    border-bottom: 0.5pt solid #a0a0a0;
-    height: 40mm;
-    flex-shrink: 0;
-}}
-.info-left, .info-right {{
-    flex: 1;
-    padding: 4mm;
+.header-info td {{
+    height: 32mm;
+    padding: 3mm 4mm;
     font-size: 8.5pt;
-    line-height: 1.55;
+    line-height: 1.5;
+    width: 50%;
 }}
-.info-left {{
+.header-info .info-left {{
     border-right: 0.5pt solid #a0a0a0;
 }}
 
 /* ─── Notes ──────────────────────────────────── */
 .notes-block {{
     border-bottom: 0.5pt solid #a0a0a0;
-    padding: 3mm 4mm;
+    padding: 2mm 4mm;
     font-size: 8.5pt;
-    min-height: 12mm;
-    flex-shrink: 0;
+    min-height: 10mm;
 }}
 
 /* ─── Title ──────────────────────────────────── */
 .title-row {{
     border-bottom: 0.5pt solid #a0a0a0;
-    height: 8mm;
-    display: flex;
-    align-items: center;
-    justify-content: center;
     position: relative;
-    flex-shrink: 0;
+    text-align: center;
+    padding: 1.5mm 0;
 }}
 .title-row .doc-title {{
     font-size: 10pt;
@@ -161,6 +160,7 @@ body {{
 .title-row .status-badge {{
     position: absolute;
     right: 4mm;
+    top: 1.5mm;
     border: 0.5pt solid #a0a0a0;
     border-radius: 2mm;
     padding: 0.5mm 2mm;
@@ -173,66 +173,58 @@ body {{
 .items-table {{
     width: 100%;
     border-collapse: collapse;
-    flex: 1;
     font-size: 8pt;
+    table-layout: fixed;
 }}
 .items-table th {{
     background: #f5f5f5;
     border: 0.35pt solid #a6acb3;
-    padding: 2mm 1.5mm;
+    padding: 1.5mm 1.5mm;
     text-align: center;
     font-weight: normal;
-    height: 8mm;
+    height: 7mm;
     font-size: 8pt;
 }}
 .items-table td {{
     border: 0.35pt solid #a6acb3;
-    padding: 1.5mm 1.5mm;
-    height: 7.5mm;
+    padding: 1mm 1.5mm;
+    height: 7mm;
     vertical-align: middle;
     font-size: 8pt;
+    overflow: hidden;
 }}
 .items-table td.center {{ text-align: center; }}
-.items-table td.name {{ max-width: 0; overflow: hidden; white-space: nowrap; }}
 .col-no    {{ width: 12mm; }}
 .col-code  {{ width: 24mm; }}
-.col-name  {{ width: auto; }}
 .col-qty   {{ width: 16mm; }}
 .col-unit  {{ width: 16mm; }}
 .col-note  {{ width: 30mm; }}
 
 /* ─── Signature ──────────────────────────────── */
 .signature-block {{
+    width: 100%;
+    border-collapse: collapse;
     border-top: 0.5pt solid #a0a0a0;
-    display: flex;
-    height: 24mm;
-    flex-shrink: 0;
+    table-layout: fixed;
 }}
-.sig-half {{
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
+.signature-block td {{
+    width: 50%;
+    height: 20mm;
+    text-align: center;
+    vertical-align: middle;
     font-size: 8.5pt;
-    gap: 2mm;
+    padding: 2mm;
 }}
-.sig-half:first-child {{
+.signature-block .sig-left {{
     border-right: 0.5pt solid #a0a0a0;
 }}
 .sig-line {{
     color: #888;
     letter-spacing: 1pt;
+    display: block;
+    margin-top: 2mm;
 }}
 
-/* ─── Page number ────────────────────────────── */
-.page-num {{
-    position: running(page-num);
-    font-size: 7.5pt;
-    color: #888;
-    text-align: right;
-}}
-@page {{ @bottom-right {{ content: element(page-num); }} }}
 """
     return CSS(string=css_string, font_config=font_config)
 
@@ -255,11 +247,15 @@ def _build_html(delivery: Dict[str, Any], company: Dict[str, Any], pages: List[L
         page_blocks += f"""
 <div class="page">
   <div class="sheet">
-    <div class="header-top">
-      <div class="header-logo">{logo_html}</div>
-      <div class="header-company">{company_html}</div>
-    </div>
-    <div class="header-info">{info_html}</div>
+    <table class="row-table header-top">
+      <tr>
+        <td class="header-logo">{logo_html}</td>
+        <td class="header-company">{company_html}</td>
+      </tr>
+    </table>
+    <table class="row-table header-info">
+      <tr>{info_html}</tr>
+    </table>
     <div class="notes-block">หมายเหตุ: {notes}</div>
     <div class="title-row">
       <span class="doc-title">ใบส่งสินค้า</span>
@@ -270,7 +266,7 @@ def _build_html(delivery: Dict[str, Any], company: Dict[str, Any], pages: List[L
         <tr>
           <th class="col-no">ลำดับ</th>
           <th class="col-code">รหัสสินค้า</th>
-          <th class="col-name">รายการสินค้า</th>
+          <th>รายการสินค้า</th>
           <th class="col-qty">จำนวน</th>
           <th class="col-unit">หน่วย</th>
           <th class="col-note">หมายเหตุ</th>
@@ -278,20 +274,21 @@ def _build_html(delivery: Dict[str, Any], company: Dict[str, Any], pages: List[L
       </thead>
       <tbody>{rows_html}</tbody>
     </table>
-    <div class="signature-block">
-      <div class="sig-half">
-        <span>ส่วนของลูกค้า / ผู้รับสินค้า</span>
-        <span class="sig-line">. . . . . . . . . . . . . . . . . .</span>
-        <span class="sig-line">. . . . / . . . . / . . . .</span>
-      </div>
-      <div class="sig-half">
-        <span>ส่วนของบริษัท / ผู้ส่งสินค้า</span>
-        <span class="sig-line">. . . . . . . . . . . . . . . . . .</span>
-        <span class="sig-line">. . . . / . . . . / . . . .</span>
-      </div>
-    </div>
+    <table class="signature-block">
+      <tr>
+        <td class="sig-left">
+          <span>ส่วนของลูกค้า / ผู้รับสินค้า</span>
+          <span class="sig-line">. . . . . . . . . . . . . . . . . .</span>
+          <span class="sig-line">. . . . / . . . . / . . . .</span>
+        </td>
+        <td>
+          <span>ส่วนของบริษัท / ผู้ส่งสินค้า</span>
+          <span class="sig-line">. . . . . . . . . . . . . . . . . .</span>
+          <span class="sig-line">. . . . / . . . . / . . . .</span>
+        </td>
+      </tr>
+    </table>
   </div>
-  <div class="page-num">หน้า {page_index + 1}/{total_pages}</div>
 </div>
 """
 
@@ -360,18 +357,18 @@ def _info_html(delivery: Dict[str, Any]) -> str:
     created_by_phone = delivery.get("created_by_phone")
     created_by_label = _esc(f"{created_by} ({created_by_phone})" if created_by_phone else created_by)
 
-    left = f"""<div class="info-left">
+    left = f"""<td class="info-left">
   <div>ส่งของถึง: {customer_name}</div>
   <div>ที่อยู่: {address}</div>
   <div>ผู้ติดต่อ: {contact}</div>
   <div>โทรศัพท์: {phone}</div>
-</div>"""
+</td>"""
 
-    right = f"""<div class="info-right">
+    right = f"""<td class="info-right">
   <div>วันที่: {delivery_date}</div>
   <div>เลขที่: {delivery_number}</div>
   <div>ผู้ทำรายการ: {created_by_label}</div>
-</div>"""
+</td>"""
 
     return left + right
 
