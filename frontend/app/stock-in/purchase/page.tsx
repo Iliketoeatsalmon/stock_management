@@ -125,7 +125,7 @@ export default function PurchasePage() {
               {error && <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>}
 
               {/* Header Info */}
-              <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+              <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-6 mb-6">
                 <h3 className="font-semibold text-gray-900 mb-4">ข้อมูลบิล</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
@@ -202,22 +202,23 @@ export default function PurchasePage() {
               </div>
 
               {/* Items */}
-              <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-                <div className="flex items-center justify-between mb-4">
+              <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-6 mb-6">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                   <h3 className="font-semibold text-gray-900">รายการสินค้า</h3>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
                     <button
                       type="button"
                       onClick={() => setShowProductModal(true)}
-                      className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                      className="flex items-center gap-1.5 px-2.5 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
                     >
                       <Plus className="w-4 h-4" />
-                      เพิ่มสินค้าใหม่
+                      <span className="hidden sm:inline">เพิ่มสินค้าใหม่</span>
+                      <span className="sm:hidden">สินค้าใหม่</span>
                     </button>
                     <button
                       type="button"
                       onClick={addItem}
-                      className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                      className="flex items-center gap-1.5 px-2.5 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
                     >
                       <Plus className="w-4 h-4" />
                       เพิ่มรายการ
@@ -226,72 +227,136 @@ export default function PurchasePage() {
                 </div>
 
                 {items.length === 0 ? (
-                  <p className="text-gray-500 text-center py-8">ยังไม่มีรายการสินค้า</p>
+                  <p className="text-gray-500 text-center py-8 text-sm">ยังไม่มีรายการสินค้า</p>
                 ) : (
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">สินค้า</th>
-                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">จำนวน</th>
-                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">ราคา/หน่วย</th>
-                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">รวม</th>
-                        <th className="px-4 py-2"></th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
+                  <>
+                    {/* Desktop table */}
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">สินค้า</th>
+                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">จำนวน</th>
+                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">ราคา/หน่วย</th>
+                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">รวม</th>
+                            <th className="px-4 py-2"></th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {items.map((item, index) => (
+                            <tr key={index}>
+                              <td className="px-4 py-2">
+                                <select
+                                  value={item.product_id}
+                                  onChange={(e) => updateItem(index, "product_id", Number.parseInt(e.target.value))}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                  required
+                                >
+                                  <option value={0}>เลือกสินค้า</option>
+                                  {products.map((p) => (
+                                    <option key={p.id} value={p.id}>
+                                      {p.code} - {p.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="px-4 py-2">
+                                <input
+                                  type="number"
+                                  value={item.quantity}
+                                  onChange={(e) => updateItem(index, "quantity", Number.parseInt(e.target.value) || 0)}
+                                  className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-right"
+                                  min="1"
+                                  required
+                                />
+                              </td>
+                              <td className="px-4 py-2">
+                                <input
+                                  type="number"
+                                  value={item.unit_price}
+                                  onChange={(e) => updateItem(index, "unit_price", Number.parseFloat(e.target.value) || 0)}
+                                  className="w-32 px-3 py-2 border border-gray-300 rounded-lg text-right"
+                                  min="0"
+                                  step="0.01"
+                                />
+                              </td>
+                              <td className="px-4 py-2 text-right font-medium">
+                                {(item.quantity * item.unit_price).toLocaleString()}
+                              </td>
+                              <td className="px-4 py-2">
+                                <button
+                                  type="button"
+                                  onClick={() => removeItem(index)}
+                                  className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Mobile cards */}
+                    <div className="md:hidden space-y-3">
                       {items.map((item, index) => (
-                        <tr key={index}>
-                          <td className="px-4 py-2">
-                            <select
-                              value={item.product_id}
-                              onChange={(e) => updateItem(index, "product_id", Number.parseInt(e.target.value))}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                              required
-                            >
-                              <option value={0}>เลือกสินค้า</option>
-                              {products.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.code} - {p.name}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="px-4 py-2">
-                            <input
-                              type="number"
-                              value={item.quantity}
-                              onChange={(e) => updateItem(index, "quantity", Number.parseInt(e.target.value) || 0)}
-                              className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-right"
-                              min="1"
-                              required
-                            />
-                          </td>
-                          <td className="px-4 py-2">
-                            <input
-                              type="number"
-                              value={item.unit_price}
-                              onChange={(e) => updateItem(index, "unit_price", Number.parseFloat(e.target.value) || 0)}
-                              className="w-32 px-3 py-2 border border-gray-300 rounded-lg text-right"
-                              min="0"
-                              step="0.01"
-                            />
-                          </td>
-                          <td className="px-4 py-2 text-right font-medium">
-                            {(item.quantity * item.unit_price).toLocaleString()}
-                          </td>
-                          <td className="px-4 py-2">
+                        <div key={index} className="border border-gray-200 rounded-lg p-3 space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-xs text-gray-500 mt-2">#{index + 1}</span>
                             <button
                               type="button"
                               onClick={() => removeItem(index)}
-                              className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                              className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg flex-shrink-0"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
-                          </td>
-                        </tr>
+                          </div>
+                          <select
+                            value={item.product_id}
+                            onChange={(e) => updateItem(index, "product_id", Number.parseInt(e.target.value))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                            required
+                          >
+                            <option value={0}>เลือกสินค้า</option>
+                            {products.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.code} - {p.name}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-xs text-gray-500 mb-1">จำนวน</label>
+                              <input
+                                type="number"
+                                value={item.quantity}
+                                onChange={(e) => updateItem(index, "quantity", Number.parseInt(e.target.value) || 0)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-right text-sm"
+                                min="1"
+                                required
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-gray-500 mb-1">ราคา/หน่วย</label>
+                              <input
+                                type="number"
+                                value={item.unit_price}
+                                onChange={(e) => updateItem(index, "unit_price", Number.parseFloat(e.target.value) || 0)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-right text-sm"
+                                min="0"
+                                step="0.01"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex justify-between pt-2 border-t border-gray-100 text-sm">
+                            <span className="text-gray-500">รวม</span>
+                            <span className="font-semibold text-gray-900">{(item.quantity * item.unit_price).toLocaleString()}</span>
+                          </div>
+                        </div>
                       ))}
-                    </tbody>
-                  </table>
+                    </div>
+                  </>
                 )}
               </div>
 

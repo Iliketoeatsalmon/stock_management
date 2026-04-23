@@ -97,18 +97,19 @@ export default function SuppliersPage() {
         <Header title="ซัพพลายเออร์" />
 
         <main className="flex-1 p-4 sm:p-6">
-          <div className="flex items-center justify-between mb-6">
-            <p className="text-gray-600">จัดการซัพพลายเออร์ในระบบ</p>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4 sm:mb-6">
+            <p className="text-gray-600 text-sm">จัดการซัพพลายเออร์ในระบบ</p>
             <button
               onClick={() => setShowModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
             >
-              <Plus className="w-5 h-5" />
+              <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
               เพิ่มซัพพลายเออร์
             </button>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+          {/* Desktop table */}
+          <div className="hidden md:block bg-white rounded-xl border border-gray-200 overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
@@ -179,6 +180,63 @@ export default function SuppliersPage() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile cards */}
+          <div className="md:hidden space-y-3">
+            {loading ? (
+              <div className="py-12 text-center">
+                <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto"></div>
+              </div>
+            ) : suppliers.length === 0 ? (
+              <div className="bg-white rounded-xl border border-gray-200 py-12 text-center text-gray-500">
+                <Users className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                <p>ยังไม่มีซัพพลายเออร์</p>
+              </div>
+            ) : (
+              suppliers.map((supplier) => (
+                <div key={supplier.id} className="bg-white rounded-xl border border-gray-200 p-4">
+                  <p className="font-semibold text-gray-900 text-sm">{supplier.name}</p>
+                  <div className="mt-2 space-y-1 text-xs text-gray-600">
+                    {supplier.contact_person && <p>ผู้ติดต่อ: {supplier.contact_person}</p>}
+                    {supplier.phone && <p>โทร: {supplier.phone}</p>}
+                    {supplier.email && <p className="truncate">อีเมล: {supplier.email}</p>}
+                  </div>
+                  <div className="flex justify-end gap-2 mt-3 pt-3 border-t border-gray-100">
+                    <button
+                      onClick={() => {
+                        setEditing(supplier)
+                        setEditForm({
+                          name: supplier.name || "",
+                          contact_person: supplier.contact_person || "",
+                          phone: supplier.phone || "",
+                          email: supplier.email || "",
+                          address: supplier.address || "",
+                          tax_id: supplier.tax_id || "",
+                        })
+                      }}
+                      className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50"
+                    >
+                      แก้ไข
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`ลบซัพพลายเออร์ ${supplier.name}?`)) return
+                        try {
+                          await api.delete(`/suppliers/${supplier.id}`)
+                          loadSuppliers()
+                        } catch (err) {
+                          alert("ลบซัพพลายเออร์ไม่สำเร็จ")
+                        }
+                      }}
+                      className="px-3 py-1.5 text-xs border border-red-300 text-red-600 rounded-lg hover:bg-red-50"
+                    >
+                      ลบ
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </main>
       </div>

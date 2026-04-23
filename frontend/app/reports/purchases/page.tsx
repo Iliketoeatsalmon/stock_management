@@ -87,22 +87,22 @@ export default function PurchaseReportPage() {
           `}</style>
 
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm print:shadow-none print:border print:border-gray-300 print:mx-0">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">รายงานการซื้อ (ตาม Supplier)</h3>
-                <p className="text-sm text-gray-600">เลือกช่วงเวลาและ Supplier</p>
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">รายงานการซื้อ (ตาม Supplier)</h3>
+                <p className="text-xs sm:text-sm text-gray-600">เลือกช่วงเวลาและ Supplier</p>
               </div>
               <div className="flex gap-2 print:hidden">
                 <button
                   onClick={loadPurchases}
-                  className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
                 >
                   <RefreshCcw className="w-4 h-4" />
-                  โหลดใหม่
+                  <span className="hidden sm:inline">โหลดใหม่</span>
                 </button>
                 <button
                   onClick={() => window.print()}
-                  className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
                 >
                   <Printer className="w-4 h-4" />
                   พิมพ์
@@ -110,7 +110,7 @@ export default function PurchaseReportPage() {
               </div>
             </div>
 
-            <div className="px-6 py-4 grid grid-cols-1 md:grid-cols-4 gap-4 print:hidden">
+            <div className="px-4 sm:px-6 py-3 sm:py-4 grid grid-cols-1 md:grid-cols-4 gap-4 print:hidden">
               <div className="md:col-span-2">
                 <label className="block text-xs text-gray-600 mb-1">Supplier</label>
                 <select
@@ -153,8 +153,8 @@ export default function PurchaseReportPage() {
               </div>
             </div>
 
-            <div className="px-6 pb-6">
-              <div className="flex items-center justify-between text-sm text-gray-700 mb-2">
+            <div className="px-4 sm:px-6 pb-4 sm:pb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs sm:text-sm text-gray-700 mb-2">
                 <div>
                   Supplier:{" "}
                   {purchaseFilter.supplier_id

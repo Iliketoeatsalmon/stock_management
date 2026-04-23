@@ -67,16 +67,16 @@ export default function NewProductPage() {
 
         <main className="flex-1 p-4 sm:p-6">
           <div className="max-w-2xl">
-            <Link href="/products" className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6">
+            <Link href="/products" className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4 sm:mb-6 text-sm">
               <ArrowLeft className="w-4 h-4" />
               กลับ
             </Link>
 
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-6">
+              <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
                 {error && <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>}
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">รหัสสินค้า *</label>
                     <input

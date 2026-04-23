@@ -164,98 +164,138 @@ export default function StockInPage() {
             </Link>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
-            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+          <div>
+            <div className="bg-white rounded-t-xl md:rounded-xl md:rounded-b-none border border-gray-200 border-b-0 md:border-b px-4 md:px-6 py-4 flex items-center justify-between">
               <h2 className="text-base font-semibold text-gray-900">ประวัติการรับสินค้า (บิลซื้อเข้า)</h2>
             </div>
 
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">เลขที่บิล</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ซัพพลายเออร์</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">วันที่</th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">จำนวนรวม</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ผู้ทำรายการ</th>
-                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">จัดการ</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {loading ? (
+            <div className="hidden md:block bg-white rounded-b-xl border border-gray-200 border-t-0 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center">
-                      <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto"></div>
-                    </td>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">เลขที่บิล</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ซัพพลายเออร์</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">วันที่</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">จำนวนรวม</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ผู้ทำรายการ</th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">จัดการ</th>
                   </tr>
-                ) : history.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
-                      <FileText className="w-12 h-12 mx-auto mb-2 text-gray-300" />
-                      <p>ยังไม่มีบิลซื้อเข้าในระบบ</p>
-                    </td>
-                  </tr>
-                ) : (
-                  history.map((row) => (
-                    <tr key={row.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 font-medium text-gray-900">{row.invoice_number}</td>
-                      <td className="px-6 py-4 text-gray-600">{row.supplier_name || "-"}</td>
-                      <td className="px-6 py-4 text-gray-600">
-                        {row.purchase_date ? format(new Date(row.purchase_date), "dd/MM/yyyy") : "-"}
-                      </td>
-                      <td className="px-6 py-4 text-right text-gray-600">{row.total_qty ?? 0}</td>
-                      <td className="px-6 py-4 text-gray-600">{row.created_by_name || "-"}</td>
-                      <td className="px-6 py-4 text-center">
-                        <button
-                          type="button"
-                          onClick={() => openDetail(row.id)}
-                          className="inline-flex items-center gap-2 px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg"
-                        >
-                          <Eye className="w-4 h-4" />
-                          ดูรายละเอียด
-                        </button>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-12 text-center">
+                        <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto"></div>
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : history.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                        <FileText className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                        <p>ยังไม่มีบิลซื้อเข้าในระบบ</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    history.map((row) => (
+                      <tr key={row.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 font-medium text-gray-900">{row.invoice_number}</td>
+                        <td className="px-6 py-4 text-gray-600">{row.supplier_name || "-"}</td>
+                        <td className="px-6 py-4 text-gray-600">
+                          {row.purchase_date ? format(new Date(row.purchase_date), "dd/MM/yyyy") : "-"}
+                        </td>
+                        <td className="px-6 py-4 text-right text-gray-600">{row.total_qty ?? 0}</td>
+                        <td className="px-6 py-4 text-gray-600">{row.created_by_name || "-"}</td>
+                        <td className="px-6 py-4 text-center">
+                          <button
+                            type="button"
+                            onClick={() => openDetail(row.id)}
+                            className="inline-flex items-center gap-2 px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg"
+                          >
+                            <Eye className="w-4 h-4" />
+                            ดูรายละเอียด
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile card list */}
+            <div className="md:hidden bg-white rounded-b-xl border border-gray-200 border-t-0 divide-y divide-gray-200">
+              {loading ? (
+                <div className="py-12 text-center">
+                  <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto" />
+                </div>
+              ) : history.length === 0 ? (
+                <div className="py-12 text-center text-gray-500">
+                  <FileText className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                  <p>ยังไม่มีบิลซื้อเข้าในระบบ</p>
+                </div>
+              ) : (
+                history.map((row) => (
+                  <button
+                    key={row.id}
+                    type="button"
+                    onClick={() => openDetail(row.id)}
+                    className="w-full text-left p-4 active:bg-gray-50"
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <p className="font-semibold text-gray-900 text-sm">{row.invoice_number}</p>
+                      <span className="text-xs text-gray-400 flex-shrink-0">
+                        {row.purchase_date ? format(new Date(row.purchase_date), "dd/MM/yyyy") : "-"}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-1">{row.supplier_name || "-"}</p>
+                    <div className="flex items-center justify-between text-xs text-gray-500">
+                      <span>ผู้ทำ: {row.created_by_name || "-"}</span>
+                      <span className="font-medium text-gray-700">จำนวน {row.total_qty ?? 0}</span>
+                    </div>
+                    <div className="mt-2 inline-flex items-center gap-1 text-xs text-blue-600">
+                      <Eye className="w-3.5 h-3.5" /> ดูรายละเอียด
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
           </div>
         </main>
       </div>
 
       {detailOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">รายละเอียดบิลซื้อเข้า</h3>
-                <p className="text-sm text-gray-500">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-4xl max-h-[92vh] overflow-y-auto">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 sticky top-0 bg-white z-10">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">รายละเอียดบิลซื้อเข้า</h3>
+                <p className="text-xs sm:text-sm text-gray-500 truncate">
                   เลขที่: {selected?.purchase.invoice_number || "-"}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-shrink-0">
                 {currentRole === "admin" && selected && (
                   <button
                     type="button"
                     onClick={handleDeletePurchase}
-                    className="inline-flex items-center gap-2 px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
+                    className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
                   >
                     <Trash2 className="w-4 h-4" />
-                    ลบบิล
+                    <span className="hidden sm:inline">ลบบิล</span>
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={closeDetail}
-                  className="inline-flex items-center gap-2 px-3 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
+                  className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
                 >
                   <X className="w-4 h-4" />
-                  ปิด
+                  <span className="hidden sm:inline">ปิด</span>
                 </button>
               </div>
             </div>
 
-            <div className="px-6 py-6 space-y-6">
+            <div className="px-4 sm:px-6 py-4 sm:py-6 space-y-6">
               {loadingDetail ? (
                 <p className="text-sm text-gray-500">กำลังโหลด...</p>
               ) : selected ? (

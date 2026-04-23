@@ -108,13 +108,13 @@ export default function UsersPage() {
         <Header title="ผู้ใช้งาน" />
 
         <main className="flex-1 p-4 sm:p-6">
-          <div className="flex items-center justify-between mb-6">
-            <p className="text-gray-600">จัดการผู้ใช้งานในระบบ</p>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4 sm:mb-6">
+            <p className="text-gray-600 text-sm">จัดการผู้ใช้งานในระบบ</p>
             {currentRole === "admin" && (
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 <button
                   onClick={() => setShowCompany(true)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
+                  className="px-3 sm:px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
                 >
                   ตั้งค่าบริษัท
                 </button>
@@ -125,16 +125,16 @@ export default function UsersPage() {
                     setForm({ username: "", email: "", phone: "", password: "", full_name: "", role: "staff" })
                     setShowModal(true)
                   }}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
                 >
-                  <Plus className="w-5 h-5" />
+                  <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
                   เพิ่มผู้ใช้
                 </button>
               </div>
             )}
           </div>
 
-          <div className="grid gap-4">
+          <div className="grid gap-3 sm:gap-4">
             {loading ? (
               <div className="flex justify-center py-12">
                 <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full"></div>
@@ -148,37 +148,37 @@ export default function UsersPage() {
               users.map((user) => (
                 <div
                   key={user.id}
-                  className="bg-white p-4 rounded-xl border border-gray-200 flex items-center justify-between"
+                  className="bg-white p-4 rounded-xl border border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
                 >
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3 sm:gap-4 min-w-0">
                     <div
-                      className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                      className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center flex-shrink-0 ${
                         user.role === "admin" ? "bg-purple-100" : "bg-blue-100"
                       }`}
                     >
                       {user.role === "admin" ? (
-                        <Shield className="w-6 h-6 text-purple-600" />
+                        <Shield className="w-5 h-5 sm:w-6 sm:h-6 text-purple-600" />
                       ) : (
-                        <User className="w-6 h-6 text-blue-600" />
+                        <User className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
                       )}
                     </div>
-                    <div>
-                      <p className="font-medium text-gray-900">{user.full_name}</p>
-                      <p className="text-sm text-gray-500">
-                        @{user.username} - {user.email || "-"} - {user.phone || "-"}
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-900 truncate">{user.full_name}</p>
+                      <p className="text-xs sm:text-sm text-gray-500 truncate">
+                        @{user.username} · {user.email || "-"} · {user.phone || "-"}
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span
-                      className={`px-3 py-1 rounded-full text-xs font-medium ${
+                      className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
                         user.role === "admin" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
                       }`}
                     >
                       {user.role}
                     </span>
                     <span
-                      className={`px-3 py-1 rounded-full text-xs ${
+                      className={`px-2.5 py-0.5 rounded-full text-xs ${
                         user.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
                       }`}
                     >
@@ -199,7 +199,7 @@ export default function UsersPage() {
                           })
                           setShowModal(true)
                         }}
-                        className="px-3 py-1 text-xs rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
+                        className="px-2.5 py-1 text-xs rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
                       >
                         Edit
                       </button>
@@ -218,7 +218,7 @@ export default function UsersPage() {
                           }
                         }}
                         disabled={user.id === currentUserId && user.is_active}
-                        className={`px-3 py-1 text-xs rounded-lg border ${
+                        className={`px-2.5 py-1 text-xs rounded-lg border ${
                           user.is_active
                             ? "text-red-600 border-red-200 hover:bg-red-50"
                             : "text-green-700 border-green-200 hover:bg-green-50"

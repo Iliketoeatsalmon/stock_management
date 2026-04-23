@@ -57,32 +57,40 @@ export default function DeliveryPrintPage() {
 
   const id = Array.isArray(params.id) ? params.id[0] : params.id
 
+  const fileName = deliveryNumber
+    ? `ใบส่งของ${deliveryNumber}.pdf`
+    : id
+      ? `ใบส่งของ${id}.pdf`
+      : "ใบส่งของ.pdf"
+
   return (
-    <div className="bg-gray-100 min-h-screen">
+    <div className="bg-gray-100 min-h-screen flex flex-col">
       <style>{`
         @page { size: A4 portrait; margin: 0; }
         @media print {
-          html, body { width: 210mm; height: 297mm; margin: 0; }
+          html, body { width: 210mm; height: 297mm; margin: 0; background: white; }
           .print-hidden { display: none !important; }
           iframe { width: 210mm !important; height: 297mm !important; }
         }
       `}</style>
-      <div className="p-4 text-right print-hidden">
+      <div className="p-3 sm:p-4 flex flex-wrap gap-2 justify-end bg-white border-b border-gray-200 print-hidden">
         <a
           href={pdfUrl}
-          download={
-            deliveryNumber
-              ? `ใบส่งของ${deliveryNumber}.pdf`
-              : id
-                ? `ใบส่งของ${id}.pdf`
-                : "ใบส่งของ.pdf"
-          }
-          className="inline-flex px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 bg-white"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center justify-center px-3 sm:px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 bg-white text-sm flex-1 sm:flex-none"
+        >
+          เปิด PDF
+        </a>
+        <a
+          href={pdfUrl}
+          download={fileName}
+          className="inline-flex items-center justify-center px-3 sm:px-4 py-2 border border-blue-600 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm flex-1 sm:flex-none"
         >
           ดาวน์โหลด PDF
         </a>
       </div>
-      <iframe title="Delivery PDF" src={pdfUrl} className="w-full h-[calc(100vh-64px)] border-0 bg-white" />
+      <iframe title="Delivery PDF" src={pdfUrl} className="flex-1 w-full border-0 bg-white min-h-[60vh]" />
     </div>
   )
 }

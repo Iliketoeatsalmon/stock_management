@@ -237,16 +237,16 @@ export default function DeliveryDetailPage() {
             }
           `}</style>
 
-          <div className="flex items-center justify-between mb-6 print:hidden">
-            <Link href="/deliveries" className="flex items-center gap-2 text-gray-600 hover:text-gray-900">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4 sm:mb-6 print:hidden">
+            <Link href="/deliveries" className="flex items-center gap-2 text-gray-600 hover:text-gray-900 text-sm">
               <ArrowLeft className="w-4 h-4" />
               กลับ
             </Link>
-            <div className="flex gap-3">
+            <div className="flex gap-2 flex-wrap">
               {(delivery.status === "draft" || currentRole === "admin") && (
                 <button
                   onClick={handleDelete}
-                  className="flex items-center gap-2 px-4 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50"
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm border border-red-300 text-red-600 rounded-lg hover:bg-red-50"
                 >
                   <Trash2 className="w-4 h-4" />
                   ลบ
@@ -254,7 +254,7 @@ export default function DeliveryDetailPage() {
               )}
               <button
                 onClick={handlePrint}
-                className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                className="flex items-center gap-1.5 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 <Printer className="w-4 h-4" />
                 พิมพ์
@@ -263,7 +263,7 @@ export default function DeliveryDetailPage() {
                 <button
                   onClick={handleConfirm}
                   disabled={confirming}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
                 >
                   <CheckCircle className="w-4 h-4" />
                   {confirming ? "กำลังยืนยัน..." : "ยืนยันส่งสินค้า"}
@@ -272,7 +272,8 @@ export default function DeliveryDetailPage() {
             </div>
           </div>
 
-          <div className="page print-area bg-white rounded-xl border border-gray-200 p-6 print:p-0 print:rounded-none print:border print:text-xs flex flex-col min-h-[270mm]">
+          <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0 print:overflow-visible print:mx-0 print:px-0">
+          <div className="page print-area bg-white rounded-xl border border-gray-200 p-4 sm:p-6 print:p-0 print:rounded-none print:border print:text-xs flex flex-col min-h-[270mm] min-w-[680px] print:min-w-0">
             {/* Header */}
             <div className="border border-gray-400">
               <div className="flex">
@@ -434,12 +435,12 @@ export default function DeliveryDetailPage() {
             </div>
 
             {isDraft && (
-              <div className="mt-4 flex justify-between items-center print:hidden">
+              <div className="mt-4 flex flex-wrap justify-between items-center gap-2 print:hidden">
                 <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={addItem}
-                    className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                    className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
                   >
                     <Plus className="w-4 h-4" />
                     เพิ่มสินค้า
@@ -448,12 +449,13 @@ export default function DeliveryDetailPage() {
                 <button
                   type="button"
                   onClick={handleSaveEdit}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
                 >
                   บันทึกการแก้ไข
                 </button>
               </div>
             )}
+          </div>
           </div>
         </main>
       </div>
