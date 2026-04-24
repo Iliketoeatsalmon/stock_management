@@ -33,6 +33,7 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - uploads_data:/app/uploads
+      - logs_data:/var/log/stock_management
     restart: unless-stopped
 
   frontend:
@@ -54,3 +55,4 @@ services:
 volumes:
   postgres_data:
   uploads_data:
+  logs_data:
