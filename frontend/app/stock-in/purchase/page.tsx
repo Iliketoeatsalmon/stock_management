@@ -76,8 +76,25 @@ export default function PurchasePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!form.invoice_number.trim()) {
+      setError("กรุณากรอกเลขที่บิล")
+      return
+    }
+    if (!form.supplier_id) {
+      setError("กรุณาเลือก Supplier")
+      return
+    }
     if (items.length === 0) {
       setError("กรุณาเพิ่มรายการสินค้า")
+      return
+    }
+
+    if (items.some((item) => !item.product_id)) {
+      setError("กรุณาเลือกสินค้าให้ครบทุกแถว")
+      return
+    }
+    if (items.some((item) => item.quantity <= 0)) {
+      setError("จำนวนสินค้าต้องมากกว่า 0")
       return
     }
 
@@ -100,7 +117,7 @@ export default function PurchasePage() {
       }
 
       await api.post("/purchases", { ...form, attachment_url: attachmentUrl, items })
-      router.push("/dashboard")
+      router.push("/stock-in")
     } catch (err: any) {
       setError(err.message || "เกิดข้อผิดพลาด")
     } finally {

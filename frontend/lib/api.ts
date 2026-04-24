@@ -14,6 +14,21 @@ export function getAuthHeaders() {
   }
 }
 
+async function readErrorMessage(res: Response, fallback: string) {
+  const contentType = res.headers.get("content-type") || ""
+
+  if (contentType.includes("application/json")) {
+    const error = await res.json().catch(() => null)
+    if (error?.detail) return String(error.detail)
+    if (error?.message) return String(error.message)
+    return fallback
+  }
+
+  const text = await res.text().catch(() => "")
+  const normalized = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+  return normalized || `${fallback} (${res.status})`
+}
+
 export async function fetchApi(endpoint: string, options: RequestInit = {}) {
   // endpoint must start with "/" such as "/auth/login", "/products"
   // Normalize to avoid double "/api" when callers pass "/api/..." while
@@ -40,8 +55,7 @@ export async function fetchApi(endpoint: string, options: RequestInit = {}) {
   }
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: "An error occurred" }))
-    throw new Error(error.detail || "An error occurred")
+    throw new Error(await readErrorMessage(res, "เกิดข้อผิดพลาด"))
   }
 
   return res.json()
@@ -65,8 +79,7 @@ export const api = {
       body: formData,
     })
     if (!res.ok) {
-      const error = await res.json().catch(() => ({ detail: "An error occurred" }))
-      throw new Error(error.detail || "Upload failed")
+      throw new Error(await readErrorMessage(res, "อัปโหลดไฟล์ไม่สำเร็จ"))
     }
     return res.json()
   },
