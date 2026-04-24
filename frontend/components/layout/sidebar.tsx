@@ -15,6 +15,7 @@ import {
   LogOut,
   ChevronRight,
   X,
+  Terminal,
 } from "lucide-react"
 
 const menuItems = [
@@ -25,6 +26,7 @@ const menuItems = [
   { href: "/customers", icon: Building2, label: "ลูกค้า" },
   { href: "/suppliers", icon: Users, label: "Supplier" },
   { href: "/reports", icon: FileText, label: "รายงาน" },
+  { href: "/logs", icon: Terminal, label: "System Logs" },
   { href: "/users", icon: Settings, label: "ผู้ใช้งาน" },
 ]
 

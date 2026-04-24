@@ -1275,3 +1275,51 @@ def health_check():
 @app.get("/api/health")
 def api_health():
     return {"status": "ok"}
+
+# System Logs
+@app.get("/api/system/logs")
+def get_system_logs(
+    service: Optional[str] = None,
+    lines: int = 100,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    """Get Docker container logs for debugging"""
+    require_admin(user)
+
+    import subprocess
+
+    logs = []
+    services = ["stock_api", "stock_web", "stock_db"] if not service else [service]
+
+    for svc in services:
+        try:
+            result = subprocess.run(
+                ["docker", "logs", "--tail", str(lines), svc],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            logs.append({
+                "service": svc,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "success": result.returncode == 0
+            })
+        except subprocess.TimeoutExpired:
+            logs.append({
+                "service": svc,
+                "error": "Timeout reading logs"
+            })
+        except FileNotFoundError:
+            logs.append({
+                "service": svc,
+                "error": "Docker command not found"
+            })
+        except Exception as e:
+            logs.append({
+                "service": svc,
+                "error": str(e)
+            })
+
+    return {"logs": logs}
