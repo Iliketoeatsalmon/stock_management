@@ -16,6 +16,10 @@ const nextConfig = {
 
   images: { unoptimized: true },
 
+  experimental: {
+    bodySizeLimit: '50mb', // Increase upload limit
+  },
+
   env: {
     NEXT_PUBLIC_API_URL:
       process.env.NEXT_PUBLIC_API_URL || "https://api-stock.cleanovaworld.com",
