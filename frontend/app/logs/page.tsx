@@ -34,7 +34,7 @@ export default function LogsPage() {
       if (selectedService !== "all") {
         params.append("service", selectedService)
       }
-      const response = await api.get<LogResponse>(`/api/system/logs?${params}`)
+      const response = await api.get(`/api/system/logs?${params}`) as LogResponse
       setLogs(response.logs)
     } catch (error: any) {
       console.error("Failed to fetch logs:", error)
