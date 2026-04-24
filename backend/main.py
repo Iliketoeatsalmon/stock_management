@@ -16,8 +16,26 @@ import os
 import shutil
 import uuid
 import io
+import logging
+from logging.handlers import RotatingFileHandler
 
 from pdf_generator import generate_delivery_pdf
+
+# Setup logging
+os.makedirs("/var/log/stock_management", exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        RotatingFileHandler(
+            "/var/log/stock_management/app.log",
+            maxBytes=10485760,  # 10MB
+            backupCount=5
+        ),
+        logging.StreamHandler()  # Also log to stdout
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Settings
 class Settings(BaseSettings):
@@ -291,6 +309,25 @@ class ManualStockIn(BaseModel):
 # FastAPI App
 app = FastAPI(title="Stock Management API", version="1.0.0")
 
+@app.on_event("startup")
+async def startup_event():
+    logger.info("=== Stock Management API Starting ===")
+    logger.info(f"Database URL: {settings.database_url.split('@')[1] if '@' in settings.database_url else 'configured'}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("=== Stock Management API Shutting Down ===")
+
+@app.middleware("http")
+async def log_requests(request, call_next):
+    logger.info(f"{request.method} {request.url.path}")
+    try:
+        response = await call_next(request)
+        return response
+    except Exception as e:
+        logger.error(f"Request failed: {request.method} {request.url.path} - {str(e)}", exc_info=True)
+        raise
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -308,15 +345,18 @@ app.mount("/api/uploads", StaticFiles(directory="uploads"), name="api_uploads")
 # Auth Routes
 @app.post("/api/auth/login")
 def login(request: LoginRequest, db: Session = Depends(get_db)):
+    logger.info(f"Login attempt for user: {request.username}")
     result = db.execute(
         text("SELECT * FROM users WHERE username = :username AND is_active = true"),
         {"username": request.username}
     )
     user = result.fetchone()
-    
+
     if not user or not verify_password(request.password, user.password_hash):
+        logger.warning(f"Failed login attempt for user: {request.username}")
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    
+
+    logger.info(f"Successful login for user: {request.username}")
     token = create_access_token({"sub": user.id})
     return {
         "access_token": token,
@@ -611,11 +651,13 @@ def report_purchases(
 # Image Upload
 @app.post("/api/upload-image")
 def upload_image(file: UploadFile = File(...)):
+    logger.info(f"Image upload: {file.filename}, size: {file.size if hasattr(file, 'size') else 'unknown'}")
     ext = os.path.splitext(file.filename)[1].lower()
     filename = f"{uuid.uuid4().hex}{ext}"
     save_path = os.path.join("uploads", filename)
     with open(save_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+    logger.info(f"Image uploaded successfully: {filename}")
     return {"url": f"/uploads/{filename}"}
 
 # Suppliers
@@ -961,6 +1003,7 @@ def delete_purchase(purchase_id: int, db: Session = Depends(get_db), user = Depe
 
 @app.post("/api/purchases")
 def create_purchase(purchase: PurchaseCreate, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    logger.info(f"Creating purchase: invoice={purchase.invoice_number}, supplier_id={purchase.supplier_id}, items={len(purchase.items)}")
     ensure_table_id_sequence(db, "purchases")
     ensure_table_id_sequence(db, "purchase_items")
     ensure_table_id_sequence(db, "movements")
@@ -1179,6 +1222,7 @@ def update_delivery(delivery_id: int, data: DeliveryUpdate, db: Session = Depend
 
 @app.post("/api/deliveries/{delivery_id}/confirm")
 def confirm_delivery(delivery_id: int, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    logger.info(f"Confirming delivery: delivery_id={delivery_id}, user={user.username}")
     delivery = db.execute(text("SELECT * FROM deliveries WHERE id = :id"), {"id": delivery_id}).fetchone()
     if not delivery:
         raise HTTPException(status_code=404, detail="Delivery not found")
@@ -1284,42 +1328,48 @@ def get_system_logs(
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
-    """Get Docker container logs for debugging"""
+    """Get application logs from log files"""
     require_admin(user)
 
-    import subprocess
-
     logs = []
-    services = ["stock_api", "stock_web", "stock_db"] if not service else [service]
+    log_dir = "/var/log/stock_management"
 
-    for svc in services:
-        try:
-            result = subprocess.run(
-                ["docker", "logs", "--tail", str(lines), svc],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
+    # Read application log file
+    app_log_path = os.path.join(log_dir, "app.log")
+
+    try:
+        if os.path.exists(app_log_path):
+            with open(app_log_path, "r") as f:
+                all_lines = f.readlines()
+                recent_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+                logs.append({
+                    "service": "stock_api",
+                    "stdout": "".join(recent_lines),
+                    "success": True
+                })
+        else:
             logs.append({
-                "service": svc,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "success": result.returncode == 0
+                "service": "stock_api",
+                "stdout": "Log file not created yet. No logs available.",
+                "success": True
             })
-        except subprocess.TimeoutExpired:
-            logs.append({
-                "service": svc,
-                "error": "Timeout reading logs"
-            })
-        except FileNotFoundError:
-            logs.append({
-                "service": svc,
-                "error": "Docker command not found"
-            })
-        except Exception as e:
-            logs.append({
-                "service": svc,
-                "error": str(e)
-            })
+    except Exception as e:
+        logs.append({
+            "service": "stock_api",
+            "error": f"Failed to read log file: {str(e)}"
+        })
+
+    # Add info about other services
+    if not service or service == "all":
+        logs.append({
+            "service": "stock_web",
+            "stdout": "Frontend logs: Check browser console or Docker logs from host machine",
+            "success": True
+        })
+        logs.append({
+            "service": "stock_db",
+            "stdout": "Database logs: Check Docker logs from host machine",
+            "success": True
+        })
 
     return {"logs": logs}
