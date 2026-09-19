@@ -1,11 +1,11 @@
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 from typing import Optional, List
 from datetime import datetime, date, timedelta
@@ -13,22 +13,33 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from passlib.exc import UnknownHashError
 import os
-import shutil
 import uuid
 import io
+import csv
+import zipfile
 import logging
 from logging.handlers import RotatingFileHandler
 
-from pdf_generator import generate_delivery_pdf
+from pdf_generator import generate_delivery_pdf, generate_delivery_report_pdf
 
 # Setup logging
-os.makedirs("/var/log/stock_management", exist_ok=True)
+# Log directory is configurable so the app also runs outside the Linux container
+# (e.g. Windows dev via run-backend.bat) where /var/log is not writable.
+LOG_DIR = os.environ.get("LOG_DIR", "/var/log/stock_management")
+try:
+    os.makedirs(LOG_DIR, exist_ok=True)
+except OSError:
+    # Fall back to a local ./logs folder if the configured path is not writable
+    LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
+    os.makedirs(LOG_DIR, exist_ok=True)
+
+LOG_FILE = os.path.join(LOG_DIR, "app.log")
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         RotatingFileHandler(
-            "/var/log/stock_management/app.log",
+            LOG_FILE,
             maxBytes=10485760,  # 10MB
             backupCount=5
         ),
@@ -76,6 +87,7 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE IF EXISTS delivery_items ADD COLUMN IF NOT EXISTS note TEXT"))
     conn.execute(text("ALTER TABLE IF EXISTS users ALTER COLUMN email DROP NOT NULL"))
     conn.execute(text("ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS phone VARCHAR(30)"))
+    conn.execute(text("ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS notify_enabled BOOLEAN NOT NULL DEFAULT true"))
     # Ensure `customers.id` has a default sequence (fix when table was created without SERIAL default)
     try:
         # Ensure sequences/defaults for common tables with SERIAL-like ids
@@ -236,6 +248,7 @@ class ProductUpdate(BaseModel):
     min_stock: Optional[int] = None
     is_active: Optional[bool] = None
     image_url: Optional[str] = None
+    notify_enabled: Optional[bool] = None
 
 class SupplierCreate(BaseModel):
     name: str
@@ -273,8 +286,8 @@ class CustomerUpdate(BaseModel):
 
 class PurchaseItemCreate(BaseModel):
     product_id: int
-    quantity: int
-    unit_price: float = 0
+    quantity: int = Field(gt=0)
+    unit_price: float = Field(default=0, ge=0)
 
 class PurchaseCreate(BaseModel):
     invoice_number: str
@@ -286,7 +299,7 @@ class PurchaseCreate(BaseModel):
 
 class DeliveryItemCreate(BaseModel):
     product_id: int
-    quantity: int
+    quantity: int = Field(gt=0)
     note: Optional[str] = None
 
 class DeliveryCreate(BaseModel):
@@ -303,7 +316,7 @@ class DeliveryUpdate(BaseModel):
 
 class ManualStockIn(BaseModel):
     product_id: int
-    quantity: int
+    quantity: int = Field(gt=0)
     notes: Optional[str] = None
 
 # FastAPI App
@@ -401,6 +414,7 @@ def get_dashboard(
             p.name,
             p.unit,
             p.min_stock,
+            p.notify_enabled,
             COALESCE(
                 SUM(
                     CASE
@@ -418,7 +432,8 @@ def get_dashboard(
             p.code,
             p.name,
             p.unit,
-            p.min_stock
+            p.min_stock,
+            p.notify_enabled
         HAVING COALESCE(
                 SUM(
                     CASE
@@ -432,6 +447,7 @@ def get_dashboard(
     """
     low_stock_rows = db.execute(text(low_stock_query)).fetchall()
     low_stock = [dict(row._mapping) for row in low_stock_rows]
+    low_stock_alert_count = sum(1 for row in low_stock if row["notify_enabled"])
 
     # movement ล่าสุด
     recent_movements_rows = db.execute(text("""
@@ -459,6 +475,7 @@ def get_dashboard(
     return {
         "total_products": total_products,
         "low_stock_count": len(low_stock),
+        "low_stock_alert_count": low_stock_alert_count,
         "low_stock_products": low_stock,
         "recent_movements": recent_movements,
         "total_customers": total_customers,
@@ -482,6 +499,7 @@ def get_products(
             p.min_stock,
             p.image_url,
             p.is_active,
+            p.notify_enabled,
             p.created_at,
             p.updated_at,
             COALESCE(
@@ -516,6 +534,7 @@ def get_products(
             p.min_stock,
             p.image_url,
             p.is_active,
+            p.notify_enabled,
             p.created_at,
             p.updated_at
         ORDER BY p.name
@@ -523,6 +542,147 @@ def get_products(
 
     result = db.execute(text(query), params)
     return [dict(row._mapping) for row in result.fetchall()]
+
+# --- One-time migration export: product registry + qty on hand, as CSV -----
+# See README/task history for the full field contract. This is read-only:
+# it never writes to the old system's tables.
+EXPORT_FETCH_BATCH_SIZE = 500
+
+
+def _build_csv_bytes(header: List[str], rows: List[list]) -> bytes:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)  # default dialect: comma, CRLF, QUOTE_MINIMAL — matches the contract
+    writer.writerow(header)
+    writer.writerows(rows)
+    return (chr(0xFEFF) + buffer.getvalue()).encode("utf-8")
+
+
+@app.get("/api/products/export")
+def export_products_csv(db: Session = Depends(get_db), user = Depends(get_current_user)):
+    require_admin(user)
+
+    cutoff_date = datetime.now().strftime("%Y-%m-%d")
+
+    # Single read-only query: full registry (active + inactive) plus qty on hand,
+    # computed with the exact same formula used everywhere else in this app.
+    result = db.execute(text("""
+        SELECT
+            p.id,
+            p.code,
+            p.name,
+            p.unit,
+            p.description,
+            p.min_stock,
+            p.is_active,
+            COALESCE(
+                SUM(CASE WHEN m.movement_type = 'IN' THEN m.quantity ELSE -m.quantity END),
+                0
+            ) AS current_stock
+        FROM products p
+        LEFT JOIN movements m ON m.product_id = p.id
+        GROUP BY p.id, p.code, p.name, p.unit, p.description, p.min_stock, p.is_active
+        ORDER BY p.id
+    """))
+
+    # Fetch in batches rather than one giant fetchall() — the dedup/sort step
+    # below inherently needs the full set in memory regardless, but this avoids
+    # holding the raw DB cursor buffer and the Python row list in memory twice.
+    raw_rows = []
+    while True:
+        batch = result.fetchmany(EXPORT_FETCH_BATCH_SIZE)
+        if not batch:
+            break
+        raw_rows.extend(dict(row._mapping) for row in batch)
+
+    # Group by original code to find duplicates before assigning final codes.
+    by_code: dict = {}
+    for row in raw_rows:
+        code = (row["code"] or "").strip()
+        by_code.setdefault(code, []).append(row)
+
+    issues = []  # (source_id, code, name, issue)
+    final_rows = []
+
+    for code, group in by_code.items():
+        # Lowest id keeps the original code; later duplicates get renamed. This
+        # is deterministic across reruns (id never changes), unlike row order.
+        group.sort(key=lambda r: r["id"])
+        for idx, row in enumerate(group):
+            source_id = row["id"]
+            name = row["name"] or ""
+
+            if not code:
+                final_code = f"LEG-{source_id:06d}"
+                issues.append((source_id, final_code, name, "MISSING_CODE_GENERATED"))
+            elif len(group) > 1 and idx > 0:
+                final_code = f"{code}-{source_id}"
+                issues.append((source_id, final_code, name, "DUPLICATE_CODE_RENAMED"))
+            else:
+                final_code = code
+
+            unit = (row["unit"] or "").strip()
+            if not unit:
+                issues.append((source_id, final_code, name, "MISSING_UNIT"))
+
+            raw_qty = row["current_stock"] or 0
+            if raw_qty < 0:
+                qty_on_hand = 0
+                issues.append((source_id, final_code, name, "NEGATIVE_QTY"))
+            elif raw_qty == 0:
+                qty_on_hand = 0
+                issues.append((source_id, final_code, name, "ZERO_QTY"))
+            else:
+                qty_on_hand = raw_qty
+
+            # No unit_cost field exists anywhere in this system for products —
+            # always blank, never guessed/zero-filled, per the migration contract.
+            issues.append((source_id, final_code, name, "MISSING_COST"))
+
+            final_rows.append([
+                source_id,
+                final_code,
+                name,
+                unit,
+                "CONSUMABLE",
+                "",  # category — no source field
+                str(qty_on_hand),
+                "",  # unit_cost — always blank, see above
+                str(row["min_stock"] if row["min_stock"] is not None else 0),
+                "true" if row["is_active"] else "false",
+                (row["description"] or "").strip(),
+            ])
+
+    final_rows.sort(key=lambda r: r[1])  # sort by final code
+    issues.sort(key=lambda i: i[1])  # same order as the main file, for easy side-by-side review
+
+    main_csv = _build_csv_bytes(
+        ["source_id", "code", "name", "unit", "kind", "category", "qty_on_hand", "unit_cost", "reorder_point", "is_active", "note"],
+        final_rows,
+    )
+    issues_csv = _build_csv_bytes(
+        ["source_id", "code", "name", "issue"],
+        [[i[0], i[1], i[2], i[3]] for i in issues],
+    )
+
+    # date_time is fixed to the cutoff date (not wall-clock time) so re-running
+    # the export with unchanged data produces a byte-identical zip file.
+    fixed_date = (int(cutoff_date[0:4]), int(cutoff_date[5:7]), int(cutoff_date[8:10]), 0, 0, 0)
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for filename, content in [
+            (f"stock-export-{cutoff_date}.csv", main_csv),
+            (f"stock-export-{cutoff_date}-issues.csv", issues_csv),
+        ]:
+            info = zipfile.ZipInfo(filename, date_time=fixed_date)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, content)
+
+    zip_filename = f"stock-export-{cutoff_date}.zip"
+    return Response(
+        content=zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_filename}"'},
+    )
 
 @app.get("/api/products/{product_id}")
 def get_product(product_id: int, db: Session = Depends(get_db), user = Depends(get_current_user)):
@@ -541,11 +701,30 @@ def get_product(product_id: int, db: Session = Depends(get_db), user = Depends(g
 
 @app.post("/api/products")
 def create_product(product: ProductCreate, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    code = product.code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="กรุณาระบุรหัสสินค้า")
+
+    # Code is permanent once set (checked against every product ever created,
+    # active or not) so a code can never be reused for a different item later.
+    existing = db.execute(
+        text("SELECT id, name, is_active FROM products WHERE TRIM(code) = :code"),
+        {"code": code},
+    ).fetchone()
+    if existing:
+        status_label = "ใช้งานอยู่" if existing.is_active else "ถูกลบ/ปิดใช้งานแล้ว"
+        raise HTTPException(
+            status_code=400,
+            detail=f'รหัส "{code}" ถูกใช้แล้วโดยสินค้า "{existing.name}" ({status_label}) กรุณาใช้รหัสอื่น',
+        )
+
+    data = product.model_dump()
+    data["code"] = code
     result = db.execute(text("""
         INSERT INTO products (code, name, description, unit, min_stock, image_url)
         VALUES (:code, :name, :description, :unit, :min_stock, :image_url)
         RETURNING *
-    """), product.model_dump())
+    """), data)
     db.commit()
     return dict(result.fetchone()._mapping)
 
@@ -582,8 +761,18 @@ def delete_product(product_id: int, db: Session = Depends(get_db), user = Depend
 
 # Reports
 @app.get("/api/reports/stock")
-def report_stock(db: Session = Depends(get_db), user = Depends(get_current_user)):
-    query = """
+def report_stock(
+    filter: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    filter_clause = ""
+    if filter == "available":
+        filter_clause = "AND COALESCE(s.current_stock, 0) > 0"
+    elif filter == "low":
+        filter_clause = "AND COALESCE(s.current_stock, 0) <= p.min_stock"
+
+    query = f"""
         SELECT
             p.*,
             COALESCE(s.current_stock, 0) AS current_stock
@@ -602,6 +791,7 @@ def report_stock(db: Session = Depends(get_db), user = Depends(get_current_user)
         ) AS s
             ON p.id = s.product_id
         WHERE p.is_active = TRUE
+        {filter_clause}
         ORDER BY p.name;
     """
     result = db.execute(text(query))
@@ -648,15 +838,125 @@ def report_purchases(
         "rows": [dict(r._mapping) for r in rows],
     }
 
+@app.get("/api/reports/deliveries")
+def report_deliveries(
+    customer_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    status: Optional[str] = "confirmed",
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    """สรุปสิ่งของที่ส่งให้แต่ละหน่วยงาน (ลูกค้า) รวมจำนวนต่อสินค้า"""
+    conditions = ["1=1"]
+    params = {}
+    if customer_id:
+        conditions.append("d.customer_id = :customer_id")
+        params["customer_id"] = customer_id
+    if start_date:
+        conditions.append("d.delivery_date >= :start_date")
+        params["start_date"] = start_date
+    if end_date:
+        conditions.append("d.delivery_date <= :end_date")
+        params["end_date"] = end_date
+    if status:
+        conditions.append("d.status = :status")
+        params["status"] = status
+    where_clause = " AND ".join(conditions)
+
+    # จำนวนต่อสินค้า (รวมทุกใบส่งของในช่วง/หน่วยงานที่เลือก)
+    rows = db.execute(text(f"""
+        SELECT p.id AS product_id, p.code AS product_code, p.name AS product_name,
+               p.unit AS unit,
+               SUM(di.quantity) AS total_quantity,
+               COUNT(DISTINCT d.id) AS delivery_count
+        FROM delivery_items di
+        JOIN deliveries d ON di.delivery_id = d.id
+        JOIN products p ON di.product_id = p.id
+        WHERE {where_clause}
+        GROUP BY p.id, p.code, p.name, p.unit
+        ORDER BY p.name
+    """), params).fetchall()
+
+    total_quantity = db.execute(text(f"""
+        SELECT COALESCE(SUM(di.quantity), 0) AS total
+        FROM delivery_items di
+        JOIN deliveries d ON di.delivery_id = d.id
+        WHERE {where_clause}
+    """), params).scalar()
+
+    delivery_count = db.execute(text(f"""
+        SELECT COUNT(DISTINCT d.id) AS cnt
+        FROM deliveries d
+        WHERE {where_clause}
+    """), params).scalar()
+
+    return {
+        "total_quantity": int(total_quantity or 0),
+        "delivery_count": int(delivery_count or 0),
+        "rows": [dict(r._mapping) for r in rows],
+    }
+
+@app.get("/api/reports/deliveries/pdf")
+def report_deliveries_pdf(
+    customer_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    status: Optional[str] = "confirmed",
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    report = report_deliveries(customer_id, start_date, end_date, status, db, user)
+    company = get_company_settings(db)
+
+    customer = None
+    if customer_id:
+        row = db.execute(text(
+            "SELECT name, address, phone, contact_person FROM customers WHERE id = :id"
+        ), {"id": customer_id}).fetchone()
+        if row:
+            customer = dict(row._mapping)
+
+    status_labels = {
+        "confirmed": "ยืนยันแล้ว (ส่งจริง)",
+        "draft": "ร่าง",
+        "cancelled": "ยกเลิก",
+    }
+    meta = {
+        "customer_name": customer["name"] if customer else "ทั้งหมด",
+        "customer_address": (customer.get("address") if customer else "") or "-",
+        "customer_contact": (customer.get("contact_person") if customer else "") or "-",
+        "customer_phone": (customer.get("phone") if customer else "") or "-",
+        "start_date": start_date or "-",
+        "end_date": end_date or "-",
+        "status_label": status_labels.get(status or "", "ทุกสถานะ"),
+        "printed_at": datetime.now().strftime("%d/%m/%Y %H:%M"),
+    }
+
+    pdf_bytes = generate_delivery_report_pdf(report, company, meta)
+    headers = {"Content-Disposition": "inline; filename=delivery-report.pdf"}
+    return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)
+
 # Image Upload
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
+
 @app.post("/api/upload-image")
-def upload_image(file: UploadFile = File(...)):
+def upload_image(file: UploadFile = File(...), user = Depends(get_current_user)):
     logger.info(f"Image upload: {file.filename}, size: {file.size if hasattr(file, 'size') else 'unknown'}")
-    ext = os.path.splitext(file.filename)[1].lower()
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+    # Read into memory so we can enforce a size limit before writing to disk
+    contents = file.file.read()
+    if len(contents) > MAX_IMAGE_SIZE:
+        raise HTTPException(status_code=400, detail="File too large (max 5MB)")
+
     filename = f"{uuid.uuid4().hex}{ext}"
     save_path = os.path.join("uploads", filename)
     with open(save_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(contents)
     logger.info(f"Image uploaded successfully: {filename}")
     return {"url": f"/uploads/{filename}"}
 
@@ -726,11 +1026,18 @@ def get_customers(db: Session = Depends(get_db), user = Depends(get_current_user
 
 @app.post("/api/customers")
 def create_customer(customer: CustomerCreate, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    ensure_table_id_sequence(db, "customers")
+    data = customer.model_dump()
+    data["name"] = data["name"].strip()
+    if not data["name"]:
+        raise HTTPException(status_code=400, detail="Name is required")
+    for key in ["contact_person", "phone", "email", "address", "tax_id"]:
+        data[key] = normalize_optional_str(data.get(key))
     result = db.execute(text("""
         INSERT INTO customers (name, contact_person, phone, email, address, tax_id)
         VALUES (:name, :contact_person, :phone, :email, :address, :tax_id)
         RETURNING *
-    """), customer.model_dump())
+    """), data)
     db.commit()
     return dict(result.fetchone()._mapping)
 
@@ -1143,10 +1450,15 @@ def get_delivery_pdf(delivery_id: int, db: Session = Depends(get_db), user = Dep
 @app.post("/api/deliveries")
 def create_delivery(delivery: DeliveryCreate, db: Session = Depends(get_db), user = Depends(get_current_user)):
     today = datetime.now().strftime("%Y%m%d")
-    count = db.execute(text(
-        "SELECT COUNT(*) FROM deliveries WHERE delivery_number LIKE :pattern"
-    ), {"pattern": f"DO-{today}%"}).scalar()
-    delivery_number = f"DO-{today}-{str(count + 1).zfill(4)}"
+    prefix = f"DO-{today}-"
+    # Use MAX of the numeric suffix (not COUNT) so deleting an older delivery
+    # cannot cause a new one to reuse an existing number and hit the UNIQUE constraint.
+    last_seq = db.execute(text("""
+        SELECT MAX(CAST(SUBSTRING(delivery_number FROM :start) AS INTEGER))
+        FROM deliveries
+        WHERE delivery_number LIKE :pattern
+    """), {"start": len(prefix) + 1, "pattern": f"{prefix}%"}).scalar()
+    delivery_number = f"{prefix}{str((last_seq or 0) + 1).zfill(4)}"
     
     # ensure id default/sequence exists for deliveries table (fix for missing SERIAL defaults)
     ensure_table_id_sequence(db, "deliveries")
@@ -1230,7 +1542,30 @@ def confirm_delivery(delivery_id: int, db: Session = Depends(get_db), user = Dep
         raise HTTPException(status_code=400, detail="Delivery already confirmed or cancelled")
     
     items = db.execute(text("SELECT * FROM delivery_items WHERE delivery_id = :id"), {"id": delivery_id}).fetchall()
-    
+
+    # Verify there is enough stock for every product before deducting anything,
+    # so a delivery cannot drive current_stock negative. Aggregate by product in
+    # case the same product appears on more than one line.
+    required_by_product = {}
+    for item in items:
+        required_by_product[item.product_id] = required_by_product.get(item.product_id, 0) + item.quantity
+
+    for product_id, required_qty in required_by_product.items():
+        current_stock = db.execute(text("""
+            SELECT COALESCE(SUM(CASE WHEN movement_type = 'IN' THEN quantity ELSE -quantity END), 0)
+            FROM movements WHERE product_id = :product_id
+        """), {"product_id": product_id}).scalar()
+        if required_qty > current_stock:
+            product = db.execute(
+                text("SELECT code, name FROM products WHERE id = :id"),
+                {"id": product_id},
+            ).fetchone()
+            product_label = f"{product.code} - {product.name}" if product else f"product {product_id}"
+            raise HTTPException(
+                status_code=400,
+                detail=f"สต๊อกไม่พอสำหรับ {product_label} (มี {current_stock}, ต้องการ {required_qty})",
+            )
+
     for item in items:
         db.execute(text("""
             INSERT INTO movements (product_id, movement_type, quantity, reference_type, reference_id, created_by)
@@ -1332,10 +1667,9 @@ def get_system_logs(
     require_admin(user)
 
     logs = []
-    log_dir = "/var/log/stock_management"
 
-    # Read application log file
-    app_log_path = os.path.join(log_dir, "app.log")
+    # Read application log file (same path used by the logging handler)
+    app_log_path = LOG_FILE
 
     try:
         if os.path.exists(app_log_path):

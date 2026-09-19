@@ -23,6 +23,122 @@ def generate_delivery_pdf(delivery: Dict[str, Any], company: Dict[str, Any]) -> 
     return HTML(string=html_str).write_pdf(stylesheets=[css], font_config=font_config)
 
 
+def generate_delivery_report_pdf(
+    report: Dict[str, Any], company: Dict[str, Any], meta: Dict[str, Any]
+) -> bytes:
+    font_config = FontConfiguration()
+    css = _build_css(font_config)
+    html_str = _build_report_html(report, company, meta)
+    return HTML(string=html_str).write_pdf(stylesheets=[css], font_config=font_config)
+
+
+def _build_report_html(
+    report: Dict[str, Any], company: Dict[str, Any], meta: Dict[str, Any]
+) -> str:
+    logo_html = _logo_html(company.get("logo"))
+    company_html = _company_html(company)
+    info_html = _report_info_html(meta)
+
+    rows = report.get("rows", []) or []
+    total_quantity = report.get("total_quantity", 0)
+    delivery_count = report.get("delivery_count", 0)
+
+    if rows:
+        body_rows = ""
+        for idx, item in enumerate(rows, start=1):
+            code = _esc(str(item.get("product_code") or "-"))
+            name = _esc(str(item.get("product_name") or ""))
+            qty = _esc(str(item.get("total_quantity") or 0))
+            unit = _esc(str(item.get("unit") or ""))
+            cnt = _esc(str(item.get("delivery_count") or 0))
+            body_rows += f"""<tr>
+  <td class="center">{idx}</td>
+  <td class="center">{code}</td>
+  <td>{name}</td>
+  <td class="center">{qty}</td>
+  <td class="center">{unit}</td>
+  <td class="center">{cnt}</td>
+</tr>"""
+    else:
+        body_rows = (
+            '<tr><td class="center" colspan="6" '
+            'style="height:12mm;color:#999;">ไม่มีข้อมูล</td></tr>'
+        )
+
+    total_row = f"""<tr>
+  <td class="center" colspan="3" style="text-align:right;font-weight:bold;background:#f5f5f5;">รวมทั้งสิ้น</td>
+  <td class="center" style="font-weight:bold;background:#f5f5f5;">{_esc(str(total_quantity))}</td>
+  <td class="center" style="background:#f5f5f5;"></td>
+  <td class="center" style="font-weight:bold;background:#f5f5f5;">{_esc(str(delivery_count))}</td>
+</tr>"""
+
+    return f"""<!DOCTYPE html>
+<html lang="th">
+<head><meta charset="utf-8" /><title>รายงานการส่งของ</title></head>
+<body>
+<div class="page">
+  <div class="sheet">
+    <table class="row-table header-top">
+      <tr>
+        <td class="header-logo">{logo_html}</td>
+        <td class="header-company">{company_html}</td>
+      </tr>
+    </table>
+    <table class="row-table header-info">
+      <tr>{info_html}</tr>
+    </table>
+    <div class="title-row">
+      <span class="doc-title">รายงานการส่งของ (ตามหน่วยงาน)</span>
+    </div>
+    <table class="items-table">
+      <thead>
+        <tr>
+          <th class="col-no">ลำดับ</th>
+          <th class="col-code">รหัสสินค้า</th>
+          <th>รายการสิ่งของ</th>
+          <th class="col-qty">จำนวนรวม</th>
+          <th class="col-unit">หน่วย</th>
+          <th class="col-note">จำนวนครั้ง</th>
+        </tr>
+      </thead>
+      <tbody>{body_rows}{total_row}</tbody>
+    </table>
+  </div>
+</div>
+</body>
+</html>"""
+
+
+def _report_info_html(meta: Dict[str, Any]) -> str:
+    customer_name = _esc(str(meta.get("customer_name") or "-"))
+    address = _esc(str(meta.get("customer_address") or "-"))
+    contact = _esc(str(meta.get("customer_contact") or "-"))
+    phone = _esc(str(meta.get("customer_phone") or "-"))
+    start_date = _esc(str(meta.get("start_date") or "-"))
+    end_date = _esc(str(meta.get("end_date") or "-"))
+    status_label = _esc(str(meta.get("status_label") or "-"))
+    printed_at = _esc(str(meta.get("printed_at") or "-"))
+
+    left = f"""<td class="info-left">
+  <div class="info-panel">
+    <div class="info-row"><span class="info-label">หน่วยงาน</span><span class="info-value">{customer_name}</span></div>
+    <div class="info-row"><span class="info-label">ที่อยู่</span><span class="info-value">{address}</span></div>
+    <div class="info-row"><span class="info-label">ผู้ติดต่อ</span><span class="info-value">{contact}</span></div>
+    <div class="info-row"><span class="info-label">โทรศัพท์</span><span class="info-value">{phone}</span></div>
+  </div>
+</td>"""
+
+    right = f"""<td class="info-right">
+  <div class="info-panel">
+    <div class="info-row"><span class="info-label">ช่วงวันที่</span><span class="info-value">{start_date} ถึง {end_date}</span></div>
+    <div class="info-row"><span class="info-label">สถานะ</span><span class="info-value">{status_label}</span></div>
+    <div class="info-row"><span class="info-label">พิมพ์เมื่อ</span><span class="info-value">{printed_at}</span></div>
+  </div>
+</td>"""
+
+    return left + right
+
+
 def _build_css(font_config: FontConfiguration) -> CSS:
     if os.path.isfile(FONT_PATH):
         font_uri = FONT_PATH.replace("\\", "/")
