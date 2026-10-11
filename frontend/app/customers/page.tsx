@@ -16,15 +16,17 @@ interface Customer {
   email?: string | null
   address: string
   tax_id?: string
+  /** true = เป็นไซต์งาน (ตารางนี้ปนทั้งไซต์ ออฟฟิศเอง และชื่อบุคคล) */
+  is_site?: boolean
 }
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
-  const [form, setForm] = useState({ name: "", contact_person: "", phone: "", email: "", address: "", tax_id: "" })
+  const [form, setForm] = useState({ name: "", contact_person: "", phone: "", email: "", address: "", tax_id: "", is_site: false })
   const [editing, setEditing] = useState<Customer | null>(null)
-  const [editForm, setEditForm] = useState({ name: "", contact_person: "", phone: "", email: "", address: "", tax_id: "" })
+  const [editForm, setEditForm] = useState({ name: "", contact_person: "", phone: "", email: "", address: "", tax_id: "", is_site: false })
 
   useEffect(() => {
     loadCustomers()
@@ -46,7 +48,7 @@ export default function CustomersPage() {
     try {
       await api.post("/customers", form)
       setShowModal(false)
-      setForm({ name: "", contact_person: "", phone: "", email: "", address: "", tax_id: "" })
+      setForm({ name: "", contact_person: "", phone: "", email: "", address: "", tax_id: "", is_site: false })
       loadCustomers()
     } catch (err) {
       const message = err && typeof err === "object" && "message" in err ? (err as any).message : String(err)
@@ -117,6 +119,8 @@ export default function CustomersPage() {
                                 email: customer.email || "",
                                 address: customer.address || "",
                                 tax_id: customer.tax_id || "",
+
+                                is_site: Boolean(customer.is_site),
                               })
                             }}
                             className="px-3 py-1 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
@@ -177,6 +181,8 @@ export default function CustomersPage() {
                           email: customer.email || "",
                           address: customer.address || "",
                           tax_id: customer.tax_id || "",
+
+                          is_site: Boolean(customer.is_site),
                         })
                       }}
                       className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50"
@@ -264,6 +270,18 @@ export default function CustomersPage() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-slate-900 placeholder-slate-500"
                   rows={2}
                 />
+              </div>
+              <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg">
+                <label className="inline-flex items-center gap-2 text-sm text-gray-800 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={form.is_site}
+                    onChange={(e) => setForm({ ...form, is_site: e.target.checked })}
+                    className="w-4 h-4"
+                  />
+                  เป็นไซต์งาน
+                </label>
+                <p className="text-xs text-gray-600 mt-1">ติ๊กถ้าเป็นหน้างานที่ส่งของไปประจำ (ไม่ใช่ออฟฟิศเราเองหรือชื่อบุคคล)</p>
               </div>
               <div className="flex gap-3 pt-4">
                 <button
@@ -354,6 +372,18 @@ export default function CustomersPage() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-slate-900 placeholder-slate-500"
                   rows={2}
                 />
+              </div>
+              <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg">
+                <label className="inline-flex items-center gap-2 text-sm text-gray-800 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={editForm.is_site}
+                    onChange={(e) => setEditForm({ ...editForm, is_site: e.target.checked })}
+                    className="w-4 h-4"
+                  />
+                  เป็นไซต์งาน
+                </label>
+                <p className="text-xs text-gray-600 mt-1">ติ๊กถ้าเป็นหน้างานที่ส่งของไปประจำ (ไม่ใช่ออฟฟิศเราเองหรือชื่อบุคคล)</p>
               </div>
               <div className="flex gap-3 pt-4">
                 <button

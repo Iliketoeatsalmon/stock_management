@@ -3,9 +3,10 @@
 import { useEffect, useState, useCallback } from "react"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
-import { api, API_URL } from "@/lib/api"
-import { Plus, Search, Edit, Eye, Package, X, Trash2, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react"
+import { api, API_URL, getAuthHeaders } from "@/lib/api"
+import { Plus, Search, Edit, Eye, Package, X, Trash2, AlertCircle, ChevronLeft, ChevronRight, Download } from "lucide-react"
 import Link from "next/link"
+import { formatQty, toLitre } from "@/lib/units"
 
 interface Product {
   id: number
@@ -13,6 +14,12 @@ interface Product {
   name: string
   unit: string
   min_stock: number
+  cost_price: number
+  wholesale_price: number
+  retail_price: number
+  litre_per_unit?: number | null
+  category?: string | null
+  item_kind?: string | null
   current_stock: number
   is_active: boolean
   description?: string
@@ -28,11 +35,20 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [editing, setEditing] = useState<Product | null>(null)
-  const [editForm, setEditForm] = useState({ name: "", description: "", unit: "", min_stock: 0, image_url: "" })
+  const [editForm, setEditForm] = useState({ name: "", description: "", unit: "", min_stock: 0, cost_price: 0, wholesale_price: 0, retail_price: 0, litre_per_unit: "" as string, category: "", item_kind: "CONSUMABLE", image_url: "" })
   const [editFile, setEditFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string>("")
   const [saving, setSaving] = useState(false)
   const [page, setPage] = useState(1)
+  const [role, setRole] = useState<string>("")
+  const [exporting, setExporting] = useState(false)
+
+  useEffect(() => {
+    const stored = localStorage.getItem("user")
+    if (stored) {
+      try { setRole(JSON.parse(stored).role || "") } catch {}
+    }
+  }, [])
 
   // Debounced search
   useEffect(() => {
@@ -78,7 +94,7 @@ export default function ProductsPage() {
 
   const openEdit = (product: Product) => {
     setEditing(product)
-    setEditForm({ name: product.name, description: product.description || "", unit: product.unit, min_stock: product.min_stock, image_url: product.image_url || "" })
+    setEditForm({ name: product.name, description: product.description || "", unit: product.unit, min_stock: product.min_stock, cost_price: product.cost_price ?? 0, wholesale_price: product.wholesale_price ?? 0, retail_price: product.retail_price ?? 0, litre_per_unit: product.litre_per_unit ? String(product.litre_per_unit) : "", category: product.category || "", item_kind: product.item_kind || "CONSUMABLE", image_url: product.image_url || "" })
     setPreview(getImageSrc(product.image_url))
     setEditFile(null)
   }
@@ -97,7 +113,15 @@ export default function ProductsPage() {
     try {
       let imageUrl = editForm.image_url
       if (editFile) imageUrl = await uploadImage(editFile)
-      await api.put(`/products/${editing.id}`, { ...editForm, image_url: imageUrl })
+      await api.put(`/products/${editing.id}`, {
+        ...editForm,
+        image_url: imageUrl,
+        // ส่ง 0 เมื่อเว้นว่าง เพราะ backend ข้าม field ที่เป็น null ทำให้ล้างค่าไม่ได้
+        // (0 ถือว่า "ไม่มีการแปลงหน่วย" เหมือนกับ NULL)
+        litre_per_unit: editForm.litre_per_unit === "" ? 0 : Number(editForm.litre_per_unit),
+        // ส่ง "" แทน null เพื่อให้ backend (ที่ข้าม field เป็น null) ล้างค่าหมวดหมู่ได้
+        category: editForm.category.trim(),
+      })
       setEditing(null)
       await loadProducts(search)
     } catch (err) {
@@ -114,6 +138,31 @@ export default function ProductsPage() {
       await loadProducts(search)
     } catch (err) {
       setError("ลบสินค้าไม่ได้")
+    }
+  }
+
+  const handleExport = async () => {
+    setExporting(true)
+    setError("")
+    try {
+      const res = await fetch(`${API_URL}/products/export`, { headers: getAuthHeaders() })
+      if (!res.ok) throw new Error("Export failed")
+      const blob = await res.blob()
+      const disposition = res.headers.get("content-disposition") || ""
+      const match = disposition.match(/filename="?([^"]+)"?/)
+      const filename = match ? match[1] : "stock-export.zip"
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError("Export ทะเบียนสินค้าไม่สำเร็จ")
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -163,6 +212,18 @@ export default function ProductsPage() {
                   <option value="code-desc">มาก→น้อย</option>
                 </select>
               </div>
+              {role === "admin" && (
+                <button
+                  type="button"
+                  onClick={handleExport}
+                  disabled={exporting}
+                  title="Export ทะเบียนสินค้า + ยอดคงเหลือ สำหรับย้ายไประบบใหม่"
+                  className="flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium flex-shrink-0 disabled:opacity-50"
+                >
+                  <Download className="w-4 h-4" />
+                  {exporting ? "กำลัง Export..." : "Export ทะเบียนสินค้า (CSV)"}
+                </button>
+              )}
               <Link
                 href="/products/new"
                 className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium flex-shrink-0"
@@ -208,8 +269,13 @@ export default function ProductsPage() {
                       <td className="px-4 py-3 text-sm text-gray-500">{product.unit}</td>
                       <td className="px-4 py-3 text-sm text-right">
                         <span className={`font-semibold ${product.current_stock <= product.min_stock ? "text-red-600" : "text-green-600"}`}>
-                          {product.current_stock}
+                          {formatQty(product.current_stock)}
                         </span>
+                        {toLitre(Number(product.current_stock), product) !== null && (
+                          <div className="text-xs text-gray-500">
+                            {formatQty(toLitre(Number(product.current_stock), product))} ลิตร
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-sm text-right text-gray-500">{product.min_stock}</td>
                       <td className="px-4 py-3 text-center">
@@ -345,6 +411,42 @@ export default function ProductsPage() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">จำนวนขั้นต่ำ</label>
                   <input type="number" value={editForm.min_stock} onChange={(e) => setEditForm({ ...editForm, min_stock: Number.parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white text-sm" min={0} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">ราคาทุน/หน่วย (บาท)</label>
+                  <input type="number" value={editForm.cost_price} onChange={(e) => setEditForm({ ...editForm, cost_price: Number.parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white text-sm" min={0} step="0.01" placeholder="0.00" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">ราคาส่ง/หน่วย (บาท)</label>
+                  <input type="number" value={editForm.wholesale_price} onChange={(e) => setEditForm({ ...editForm, wholesale_price: Number.parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white text-sm" min={0} step="0.01" placeholder="0.00" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">ราคาปลีก/หน่วย (บาท)</label>
+                  <input type="number" value={editForm.retail_price} onChange={(e) => setEditForm({ ...editForm, retail_price: Number.parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white text-sm" min={0} step="0.01" placeholder="0.00" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">หมวดหมู่</label>
+                  <input type="text" value={editForm.category} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white text-sm" placeholder="เช่น น้ำยาทำความสะอาด, อุปกรณ์" list="product-category-list" />
+                  <datalist id="product-category-list">
+                    {Array.from(new Set(products.map((p) => p.category).filter(Boolean))).map((c) => (
+                      <option key={String(c)} value={String(c)} />
+                    ))}
+                  </datalist>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">ประเภทการใช้งาน</label>
+                  <select value={editForm.item_kind} onChange={(e) => setEditForm({ ...editForm, item_kind: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white text-sm">
+                    <option value="CONSUMABLE">ของสิ้นเปลือง (ส่งแล้วจบ)</option>
+                    <option value="REUSABLE">ของใช้ซ้ำ (ต้องตามเก็บคืน)</option>
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">ใช้แยกของที่ต้องตามเก็บคืนจากไซต์</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    ลิตรต่อ 1 {editForm.unit || "หน่วย"}
+                  </label>
+                  <input type="number" value={editForm.litre_per_unit} onChange={(e) => setEditForm({ ...editForm, litre_per_unit: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white text-sm" min={0} step="0.001" placeholder="เช่น 3.8 (เว้นว่างถ้าไม่ใช่ของเหลว)" />
+                  <p className="text-xs text-gray-500 mt-1">ใส่แล้วจะจ่ายออกเป็นลิตรได้</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">รายละเอียด</label>

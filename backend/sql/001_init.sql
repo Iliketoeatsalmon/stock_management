@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS customers (
     email VARCHAR(100),
     address TEXT,
     tax_id VARCHAR(30),
+    is_site BOOLEAN NOT NULL DEFAULT false, -- true = เป็นไซต์งาน ไม่ใช่ออฟฟิศ/บุคคล
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -49,6 +50,12 @@ CREATE TABLE IF NOT EXISTS products (
     description TEXT,
     unit VARCHAR(20) NOT NULL DEFAULT 'ชิ้น',
     min_stock INTEGER DEFAULT 0,
+    cost_price DECIMAL(12,2) NOT NULL DEFAULT 0,
+    wholesale_price DECIMAL(12,2) NOT NULL DEFAULT 0,
+    retail_price DECIMAL(12,2) NOT NULL DEFAULT 0,
+    litre_per_unit DECIMAL(10,3), -- ลิตรต่อ 1 หน่วย (NULL = ไม่มีการแปลงหน่วย)
+    category VARCHAR(100),        -- หมวดหมู่สำหรับ catalog
+    item_kind VARCHAR(20) NOT NULL DEFAULT 'CONSUMABLE', -- REUSABLE = ต้องตามเก็บคืน
     image_url VARCHAR(255),
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -75,8 +82,10 @@ CREATE TABLE IF NOT EXISTS purchase_items (
     id SERIAL PRIMARY KEY,
     purchase_id INTEGER REFERENCES purchases(id) ON DELETE CASCADE,
     product_id INTEGER REFERENCES products(id),
-    quantity INTEGER NOT NULL,
+    quantity DECIMAL(12,4) NOT NULL,
     unit_price DECIMAL(12,2) DEFAULT 0,
+    input_quantity DECIMAL(12,4),
+    input_unit VARCHAR(20),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -100,8 +109,35 @@ CREATE TABLE IF NOT EXISTS delivery_items (
     id SERIAL PRIMARY KEY,
     delivery_id INTEGER REFERENCES deliveries(id) ON DELETE CASCADE,
     product_id INTEGER REFERENCES products(id),
-    quantity INTEGER NOT NULL,
+    quantity DECIMAL(12,4) NOT NULL,
     note TEXT,
+    input_quantity DECIMAL(12,4),
+    input_unit VARCHAR(20),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Returns table (ใบคืนของจากหน้างาน)
+CREATE TABLE IF NOT EXISTS returns (
+    id SERIAL PRIMARY KEY,
+    return_number VARCHAR(50) UNIQUE NOT NULL,
+    customer_id INTEGER REFERENCES customers(id),
+    site_name VARCHAR(255),
+    return_date DATE NOT NULL,
+    notes TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Return Items table
+CREATE TABLE IF NOT EXISTS return_items (
+    id SERIAL PRIMARY KEY,
+    return_id INTEGER REFERENCES returns(id) ON DELETE CASCADE,
+    product_id INTEGER REFERENCES products(id),
+    quantity DECIMAL(12,4) NOT NULL,
+    note TEXT,
+    input_quantity DECIMAL(12,4),
+    input_unit VARCHAR(20),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -110,7 +146,7 @@ CREATE TABLE IF NOT EXISTS movements (
     id SERIAL PRIMARY KEY,
     product_id INTEGER REFERENCES products(id),
     movement_type VARCHAR(10) NOT NULL CHECK (movement_type IN ('IN', 'OUT')),
-    quantity INTEGER NOT NULL,
+    quantity DECIMAL(12,4) NOT NULL,
     reference_type VARCHAR(20), -- 'purchase', 'delivery', 'manual', 'return'
     reference_id INTEGER,
     notes TEXT,
