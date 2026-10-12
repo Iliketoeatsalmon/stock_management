@@ -921,6 +921,10 @@ def column_exists(db: Session, table: str, column: str) -> bool:
     return _column_cache[key]
 
 
+from erp_reports import build_router as build_erp_reports_router  # noqa: E402
+
+app.include_router(build_erp_reports_router(get_db, require_api_key))
+
 CATALOG_MAX_LIMIT = 500
 
 
