@@ -9,13 +9,13 @@ import { Header } from "@/components/layout/header"
 import { api, API_URL, resolveUploadUrl } from "@/lib/api"
 import { ArrowLeft, Save } from "lucide-react"
 import Link from "next/link"
+import { NumberInput } from "@/components/ui/number-input"
 
 export default function NewProductPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [form, setForm] = useState({
-    code: "",
     name: "",
     description: "",
     unit: "ชิ้น",
@@ -55,13 +55,15 @@ export default function NewProductPage() {
         imageUrl = resolveUploadUrl(uploadRes.url)
       }
 
-      await api.post("/products", {
+      const created = await api.post("/products", {
         ...form,
         image_url: imageUrl,
         // ว่าง = ไม่มีการแปลงหน่วย ส่ง null ให้ backend เก็บเป็น NULL
         litre_per_unit: form.litre_per_unit === "" ? null : Number(form.litre_per_unit),
         category: form.category.trim() || null,
       })
+      // รหัสสร้างโดยระบบ แจ้งให้ผู้ใช้รู้ว่าได้รหัสอะไร
+      alert(`บันทึกสินค้าแล้ว รหัส ${created.code}`)
       router.push("/products")
     } catch (err: any) {
       setError(err.message || "เกิดข้อผิดพลาด")
@@ -90,16 +92,11 @@ export default function NewProductPage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">รหัสสินค้า *</label>
-                    <input
-                      type="text"
-                      value={form.code}
-                      onChange={(e) => setForm({ ...form, code: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 placeholder-slate-500 bg-white"
-                    placeholder="CLN-001"
-                    required
-                  />
-                </div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">รหัสสินค้า</label>
+                    <div className="w-full px-4 py-2 border border-dashed border-gray-300 rounded-lg bg-gray-50 text-gray-500">
+                      สร้างให้อัตโนมัติเมื่อบันทึก
+                    </div>
+                  </div>
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">หน่วยนับ *</label>
                     <input
@@ -163,20 +160,18 @@ export default function NewProductPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">จำนวนขั้นต่ำ (แจ้งเตือน)</label>
-                    <input
-                      type="number"
+                    <NumberInput integer
                       value={form.min_stock}
-                      onChange={(e) => setForm({ ...form, min_stock: Number.parseInt(e.target.value) || 0 })}
+                      onValueChange={(v) => setForm({ ...form, min_stock: v })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 placeholder-slate-500 bg-white"
                       min="0"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">ราคาทุน/หน่วย (บาท)</label>
-                    <input
-                      type="number"
+                    <NumberInput
                       value={form.cost_price}
-                      onChange={(e) => setForm({ ...form, cost_price: Number.parseFloat(e.target.value) || 0 })}
+                      onValueChange={(v) => setForm({ ...form, cost_price: v })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 placeholder-slate-500 bg-white"
                       min="0"
                       step="0.01"
@@ -185,10 +180,9 @@ export default function NewProductPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">ราคาส่ง/หน่วย (บาท)</label>
-                    <input
-                      type="number"
+                    <NumberInput
                       value={form.wholesale_price}
-                      onChange={(e) => setForm({ ...form, wholesale_price: Number.parseFloat(e.target.value) || 0 })}
+                      onValueChange={(v) => setForm({ ...form, wholesale_price: v })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 placeholder-slate-500 bg-white"
                       min="0"
                       step="0.01"
@@ -197,10 +191,9 @@ export default function NewProductPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">ราคาปลีก/หน่วย (บาท)</label>
-                    <input
-                      type="number"
+                    <NumberInput
                       value={form.retail_price}
-                      onChange={(e) => setForm({ ...form, retail_price: Number.parseFloat(e.target.value) || 0 })}
+                      onValueChange={(v) => setForm({ ...form, retail_price: v })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 placeholder-slate-500 bg-white"
                       min="0"
                       step="0.01"

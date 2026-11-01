@@ -7,6 +7,7 @@ import { api, API_URL, getAuthHeaders } from "@/lib/api"
 import { Plus, Search, Edit, Eye, Package, X, Trash2, AlertCircle, ChevronLeft, ChevronRight, Download } from "lucide-react"
 import Link from "next/link"
 import { formatQty, toLitre } from "@/lib/units"
+import { NumberInput } from "@/components/ui/number-input"
 
 interface Product {
   id: number
@@ -20,6 +21,8 @@ interface Product {
   litre_per_unit?: number | null
   category?: string | null
   item_kind?: string | null
+  /** รหัสก่อนรันรหัสใหม่ (null = สินค้าที่สร้างหลังเปลี่ยนระบบรหัส) */
+  legacy_code?: string | null
   current_stock: number
   is_active: boolean
   description?: string
@@ -264,7 +267,12 @@ export default function ProductsPage() {
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-sm font-medium text-gray-900">{product.code}</td>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                        {product.code}
+                        {product.legacy_code && product.legacy_code !== product.code && (
+                          <div className="text-xs font-normal text-gray-400">เดิม {product.legacy_code}</div>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-sm text-gray-900">{product.name}</td>
                       <td className="px-4 py-3 text-sm text-gray-500">{product.unit}</td>
                       <td className="px-4 py-3 text-sm text-right">
@@ -317,7 +325,10 @@ export default function ProductsPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <p className="text-xs text-gray-400">{product.code}</p>
+                          <p className="text-xs text-gray-400">
+                            {product.code}
+                            {product.legacy_code && product.legacy_code !== product.code && ` (เดิม ${product.legacy_code})`}
+                          </p>
                           <p className="font-semibold text-gray-900 text-sm leading-tight">{product.name}</p>
                         </div>
                         <span className={`px-2 py-0.5 text-xs rounded-full flex-shrink-0 ${product.current_stock <= product.min_stock ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>
@@ -410,19 +421,19 @@ export default function ProductsPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">จำนวนขั้นต่ำ</label>
-                  <input type="number" value={editForm.min_stock} onChange={(e) => setEditForm({ ...editForm, min_stock: Number.parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white text-sm" min={0} />
+                  <NumberInput integer value={editForm.min_stock} onValueChange={(v) => setEditForm({ ...editForm, min_stock: v })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white text-sm" min={0} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">ราคาทุน/หน่วย (บาท)</label>
-                  <input type="number" value={editForm.cost_price} onChange={(e) => setEditForm({ ...editForm, cost_price: Number.parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white text-sm" min={0} step="0.01" placeholder="0.00" />
+                  <NumberInput value={editForm.cost_price} onValueChange={(v) => setEditForm({ ...editForm, cost_price: v })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white text-sm" min={0} step="0.01" placeholder="0.00" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">ราคาส่ง/หน่วย (บาท)</label>
-                  <input type="number" value={editForm.wholesale_price} onChange={(e) => setEditForm({ ...editForm, wholesale_price: Number.parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white text-sm" min={0} step="0.01" placeholder="0.00" />
+                  <NumberInput value={editForm.wholesale_price} onValueChange={(v) => setEditForm({ ...editForm, wholesale_price: v })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white text-sm" min={0} step="0.01" placeholder="0.00" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">ราคาปลีก/หน่วย (บาท)</label>
-                  <input type="number" value={editForm.retail_price} onChange={(e) => setEditForm({ ...editForm, retail_price: Number.parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white text-sm" min={0} step="0.01" placeholder="0.00" />
+                  <NumberInput value={editForm.retail_price} onValueChange={(v) => setEditForm({ ...editForm, retail_price: v })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white text-sm" min={0} step="0.01" placeholder="0.00" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">หมวดหมู่</label>
