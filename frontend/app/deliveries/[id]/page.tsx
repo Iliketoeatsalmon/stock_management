@@ -7,6 +7,10 @@ import { Header } from "@/components/layout/header"
 import { api } from "@/lib/api"
 import { withBasePath } from "@/lib/base-path"
 import { fetchCompanySettings, loadCompanySettings } from "@/lib/company"
+import { validateItemsAgainstStock } from "@/lib/stock"
+import { ProductSelect } from "@/components/ui/product-select"
+import { QuantityInput } from "@/components/ui/quantity-input"
+import { formatQty, toBaseQuantity, unitOptions } from "@/lib/units"
 import { ArrowLeft, CheckCircle, Printer, Trash2, Plus, Minus } from "lucide-react"
 import Link from "next/link"
 import { format } from "date-fns"
@@ -142,14 +146,25 @@ export default function DeliveryDetailPage() {
       alert("กรุณาเพิ่มรายการอย่างน้อย 1 รายการ")
       return
     }
+    // แปลงเป็นหน่วยฐานก่อนเช็คสต็อกและบันทึก (ผู้ใช้อาจกรอกเป็นลิตร)
+    const baseItems = editItems.map((i) => {
+      const product = products.find((p) => p.id === i.product_id)
+      const unit = i.input_unit || unitOptions(product)[0]
+      return {
+        product_id: i.product_id,
+        quantity: toBaseQuantity(Number(i.quantity) || 0, unit, product),
+        note: i.note || "",
+        input_quantity: Number(i.quantity) || 0,
+        input_unit: unit,
+      }
+    })
+    const stockError = validateItemsAgainstStock(baseItems, products)
+    if (stockError) {
+      alert(stockError)
+      return
+    }
     try {
-      await api.put(`/api/deliveries/${params.id}`, {
-        items: editItems.map((i) => ({
-          product_id: i.product_id,
-          quantity: Number(i.quantity) || 0,
-          note: i.note || "",
-        })),
-      })
+      await api.put(`/api/deliveries/${params.id}`, { items: baseItems })
       await loadDelivery()
       alert("บันทึกการแก้ไขแล้ว")
     } catch (err: any) {
@@ -364,18 +379,13 @@ export default function DeliveryDetailPage() {
                     <td className="border border-gray-300 p-2 align-top">
                       {isDraft ? (
                         <div className="space-y-1">
-                          <select
+                          <ProductSelect
+                            products={products}
                             value={item.product_id}
-                            onChange={(e) => updateItem(index, "product_id", Number(e.target.value))}
-                            className="w-full px-2 py-1 border border-gray-300 rounded-lg"
-                          >
-                            <option value={0}>เลือกสินค้า</option>
-                            {products.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.code} - {p.name}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(id) => updateItem(index, "product_id", id)}
+                            showStock
+                            className="px-2 py-1"
+                          />
                         </div>
                       ) : (
                         <div>
@@ -385,15 +395,23 @@ export default function DeliveryDetailPage() {
                     </td>
                     <td className="border border-gray-300 p-2 text-center align-middle">
                       {isDraft ? (
-                        <input
-                          type="number"
-                          min={1}
-                          value={item.quantity}
-                          onChange={(e) => updateItem(index, "quantity", Number(e.target.value) || 0)}
-                          className="w-20 px-2 py-1 border border-gray-300 rounded-lg text-center"
-                        />
+                        <div className="w-36 mx-auto">
+                          <QuantityInput
+                            value={item.quantity}
+                            unit={item.input_unit || unitOptions(products.find((p) => p.id === item.product_id))[0]}
+                            product={products.find((p) => p.id === item.product_id)}
+                            onChange={({ quantity, unit }) => {
+                              setEditItems((prev) => {
+                                const next = [...prev]
+                                next[index] = { ...next[index], quantity, input_unit: unit }
+                                return next
+                              })
+                            }}
+                            className="py-1"
+                          />
+                        </div>
                       ) : (
-                        item.quantity
+                        formatQty(item.quantity)
                       )}
                     </td>
                     <td className="border border-gray-300 p-2 text-center align-middle">{item.unit}</td>

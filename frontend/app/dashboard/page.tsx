@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
 import { api } from "@/lib/api"
-import { Package, AlertTriangle, Users, Building2, ArrowDownToLine, ArrowUpFromLine, Truck, Plus, AlertCircle, RefreshCw } from "lucide-react"
+import { Package, AlertTriangle, Users, Building2, ArrowDownToLine, ArrowUpFromLine, Truck, Plus, AlertCircle, RefreshCw, Bell, BellOff } from "lucide-react"
 import Link from "next/link"
 
 interface DashboardData {
@@ -35,6 +35,42 @@ export default function DashboardPage() {
       setError("โหลดข้อมูลแดชบอร์ดไม่ได้ กรุณาตรวจสอบการเชื่อมต่อ")
     } finally {
       setLoading(false)
+    }
+  }
+
+  const toggleNotify = async (productId: number, nextEnabled: boolean) => {
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            low_stock_products: prev.low_stock_products.map((p) =>
+              p.id === productId ? { ...p, notify_enabled: nextEnabled } : p,
+            ),
+          }
+        : prev,
+    )
+    try {
+      await api.put(`/products/${productId}`, { notify_enabled: nextEnabled })
+    } catch (err) {
+      loadDashboard()
+    }
+  }
+
+  const allNotifyEnabled =
+    (data?.low_stock_products?.length ?? 0) > 0 && data!.low_stock_products.every((p) => p.notify_enabled)
+
+  const toggleNotifyAll = async () => {
+    if (!data?.low_stock_products?.length) return
+    const nextEnabled = !allNotifyEnabled
+    setData((prev) =>
+      prev
+        ? { ...prev, low_stock_products: prev.low_stock_products.map((p) => ({ ...p, notify_enabled: nextEnabled })) }
+        : prev,
+    )
+    try {
+      await Promise.all(data.low_stock_products.map((p) => api.put(`/products/${p.id}`, { notify_enabled: nextEnabled })))
+    } catch (err) {
+      loadDashboard()
     }
   }
 
@@ -132,19 +168,40 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Low Stock */}
             <div className="bg-white rounded-xl border border-gray-200">
-              <div className="p-4 border-b border-gray-100 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-red-500" />
-                <h3 className="font-semibold text-gray-900 text-sm">สินค้าใกล้หมด</h3>
+              <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-500" />
+                  <h3 className="font-semibold text-gray-900 text-sm">สินค้าใกล้หมด</h3>
+                </div>
+                {data?.low_stock_products && data.low_stock_products.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={toggleNotifyAll}
+                    className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-600"
+                    title={allNotifyEnabled ? "ปิดแจ้งเตือนทั้งหมด" : "เปิดแจ้งเตือนทั้งหมด"}
+                  >
+                    {allNotifyEnabled ? <BellOff className="w-3.5 h-3.5" /> : <Bell className="w-3.5 h-3.5" />}
+                    {allNotifyEnabled ? "ปิดแจ้งเตือนทั้งหมด" : "แจ้งเตือนทั้งหมด"}
+                  </button>
+                )}
               </div>
               <div className="p-4">
                 {data?.low_stock_products && data.low_stock_products.length > 0 ? (
                   <div className="space-y-2">
                     {data.low_stock_products.map((p) => (
-                      <div key={p.id} className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
-                        <div className="min-w-0">
-                          <p className="font-medium text-gray-900 text-sm truncate">{p.name}</p>
-                          <p className="text-xs text-gray-500">{p.code}</p>
-                        </div>
+                      <div key={p.id} className="flex items-center justify-between p-3 bg-red-50 rounded-lg gap-2">
+                        <label className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer" title="ติ๊กเพื่อรับแจ้งเตือนสินค้านี้เมื่อใกล้หมด">
+                          <input
+                            type="checkbox"
+                            checked={!!p.notify_enabled}
+                            onChange={(e) => toggleNotify(p.id, e.target.checked)}
+                            className="w-4 h-4 accent-red-600 flex-shrink-0"
+                          />
+                          <div className="min-w-0">
+                            <p className="font-medium text-gray-900 text-sm truncate">{p.name}</p>
+                            <p className="text-xs text-gray-500">{p.code}</p>
+                          </div>
+                        </label>
                         <div className="text-right flex-shrink-0 ml-2">
                           <p className="font-bold text-red-600 text-sm">{p.current_stock} {p.unit}</p>
                           <p className="text-xs text-gray-400">Min: {p.min_stock}</p>

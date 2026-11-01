@@ -5,6 +5,8 @@ import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
 import { api, API_URL, resolveUploadUrl } from "@/lib/api"
 import { FileText, Printer, RefreshCcw, Filter } from "lucide-react"
+import { ReportPrintHeader } from "@/components/reports/report-print-header"
+import { formatQty, toLitre } from "@/lib/units"
 
 interface StockRow {
   id: number
@@ -13,6 +15,7 @@ interface StockRow {
   unit: string
   min_stock: number
   current_stock: number
+  litre_per_unit?: number | null
   image_url?: string
 }
 
@@ -57,7 +60,13 @@ export default function StockReportPage() {
           `}</style>
 
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm print:shadow-none print:border print:border-gray-300 print:mx-0">
-            <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200">
+            <div className="px-4 sm:px-6 print:px-0 print:pt-2">
+              <ReportPrintHeader
+                title="รายงานสต๊อก"
+                meta={`ตัวกรอง: ${stockFilter === "all" ? "ทั้งหมด" : stockFilter === "available" ? "มีของคงเหลือ" : "ใกล้หมด"} | รายการ: ${stockData.length.toLocaleString()}`}
+              />
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 print:hidden">
               <div>
                 <h3 className="text-base sm:text-lg font-semibold text-gray-900">รายงานสต๊อก</h3>
                 <p className="text-xs sm:text-sm text-gray-600">เลือกตัวกรองแล้วพิมพ์รายงาน</p>
@@ -106,7 +115,7 @@ export default function StockReportPage() {
             </div>
 
             <div className="px-4 sm:px-6 pb-4 sm:pb-6">
-              <div className="text-sm text-gray-600 mb-2">
+              <div className="text-sm text-gray-600 mb-2 print:hidden">
                 รายการ: {stockData.length.toLocaleString()} | ตัวกรอง:{" "}
                 {stockFilter === "all" ? "ทั้งหมด" : stockFilter === "available" ? "มีของคงเหลือ" : "ใกล้หมด"}
               </div>
@@ -115,7 +124,7 @@ export default function StockReportPage() {
                   <thead className="bg-gray-100">
                     <tr>
                       <th className="border border-gray-200 px-3 py-2 w-10">ลำดับ</th>
-                      <th className="border border-gray-200 px-3 py-2 w-20">รูป</th>
+                      <th className="border border-gray-200 px-3 py-2 w-20 print:hidden">รูป</th>
                       <th className="border border-gray-200 px-3 py-2">สินค้า</th>
                       <th className="border border-gray-200 px-3 py-2 text-right w-20">คงเหลือ</th>
                       <th className="border border-gray-200 px-3 py-2 text-right w-20">ขั้นต่ำ</th>
@@ -140,7 +149,7 @@ export default function StockReportPage() {
                       stockData.map((p, idx) => (
                         <tr key={p.id} className="odd:bg-white even:bg-gray-50">
                           <td className="border border-gray-200 px-3 py-2 text-center">{idx + 1}</td>
-                          <td className="border border-gray-200 px-3 py-2">
+                          <td className="border border-gray-200 px-3 py-2 print:hidden">
                             {p.image_url ? (
                               <img
                                 src={resolveUploadUrl(p.image_url || "")}
@@ -160,7 +169,12 @@ export default function StockReportPage() {
                               p.current_stock <= p.min_stock ? "text-red-600" : "text-green-600"
                             }`}
                           >
-                            {p.current_stock}
+                            {formatQty(p.current_stock)}
+                            {toLitre(Number(p.current_stock), p) !== null && (
+                              <div className="text-xs font-normal text-gray-500">
+                                {formatQty(toLitre(Number(p.current_stock), p))} ลิตร
+                              </div>
+                            )}
                           </td>
                           <td className="border border-gray-200 px-3 py-2 text-right text-gray-700">{p.min_stock}</td>
                           <td className="border border-gray-200 px-3 py-2 text-center text-gray-700">{p.unit}</td>

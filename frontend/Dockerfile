@@ -1,7 +1,9 @@
 # Use Amazon ECR Public mirror to avoid Docker Hub auth outages
 FROM public.ecr.aws/docker/library/node:20-alpine AS base
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Pin to pnpm 9.x (matches pnpm-lock.yaml lockfileVersion 9.0). Newer pnpm
+# releases require Node's "node:sqlite" module, which isn't in node:20-alpine.
+RUN corepack enable && corepack prepare pnpm@9 --activate
 
 # Install dependencies only when needed
 FROM base AS deps

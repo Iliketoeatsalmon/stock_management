@@ -13,13 +13,26 @@ FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "fonts", "NotoSans
 UPLOADS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "uploads"))
 
 
-def generate_delivery_pdf(delivery: Dict[str, Any], company: Dict[str, Any]) -> bytes:
+DEFAULT_DELIVERY_OPTIONS = {
+    "show_image": True,
+    "show_price": False,
+    "price_field": "wholesale_price",
+    "price_label": "ราคาส่ง",
+}
+
+
+def generate_delivery_pdf(
+    delivery: Dict[str, Any],
+    company: Dict[str, Any],
+    options: Optional[Dict[str, Any]] = None,
+) -> bytes:
+    opts = {**DEFAULT_DELIVERY_OPTIONS, **(options or {})}
     items = sorted(delivery.get("items", []) or [], key=_product_code_sort_key)
     pages = _chunk(items, PAGE_SIZE)
 
     font_config = FontConfiguration()
     css = _build_css(font_config)
-    html_str = _build_html(delivery, company, pages)
+    html_str = _build_html(delivery, company, pages, opts)
     return HTML(string=html_str).write_pdf(stylesheets=[css], font_config=font_config)
 
 
@@ -41,6 +54,7 @@ def _build_report_html(
 
     rows = report.get("rows", []) or []
     total_quantity = report.get("total_quantity", 0)
+    total_value = report.get("total_value", 0)
     delivery_count = report.get("delivery_count", 0)
 
     if rows:
@@ -48,8 +62,10 @@ def _build_report_html(
         for idx, item in enumerate(rows, start=1):
             code = _esc(str(item.get("product_code") or "-"))
             name = _esc(str(item.get("product_name") or ""))
-            qty = _esc(str(item.get("total_quantity") or 0))
+            qty = _qty(item.get("total_quantity"))
             unit = _esc(str(item.get("unit") or ""))
+            price = _money(item.get("unit_price"))
+            value = _money(item.get("total_value"))
             cnt = _esc(str(item.get("delivery_count") or 0))
             body_rows += f"""<tr>
   <td class="center">{idx}</td>
@@ -57,18 +73,22 @@ def _build_report_html(
   <td>{name}</td>
   <td class="center">{qty}</td>
   <td class="center">{unit}</td>
+  <td style="text-align:right;">{price}</td>
+  <td style="text-align:right;">{value}</td>
   <td class="center">{cnt}</td>
 </tr>"""
     else:
         body_rows = (
-            '<tr><td class="center" colspan="6" '
+            '<tr><td class="center" colspan="8" '
             'style="height:12mm;color:#999;">ไม่มีข้อมูล</td></tr>'
         )
 
     total_row = f"""<tr>
   <td class="center" colspan="3" style="text-align:right;font-weight:bold;background:#f5f5f5;">รวมทั้งสิ้น</td>
-  <td class="center" style="font-weight:bold;background:#f5f5f5;">{_esc(str(total_quantity))}</td>
+  <td class="center" style="font-weight:bold;background:#f5f5f5;">{_qty(total_quantity)}</td>
   <td class="center" style="background:#f5f5f5;"></td>
+  <td style="background:#f5f5f5;"></td>
+  <td style="text-align:right;font-weight:bold;background:#f5f5f5;">{_money(total_value)}</td>
   <td class="center" style="font-weight:bold;background:#f5f5f5;">{_esc(str(delivery_count))}</td>
 </tr>"""
 
@@ -98,7 +118,9 @@ def _build_report_html(
           <th>รายการสิ่งของ</th>
           <th class="col-qty">จำนวนรวม</th>
           <th class="col-unit">หน่วย</th>
-          <th class="col-note">จำนวนครั้ง</th>
+          <th class="col-price">{_esc(meta.get("price_label") or "ราคาทุน")}/หน่วย</th>
+          <th class="col-price">มูลค่ารวม</th>
+          <th class="col-cnt">จำนวนครั้ง</th>
         </tr>
       </thead>
       <tbody>{body_rows}{total_row}</tbody>
@@ -118,6 +140,7 @@ def _report_info_html(meta: Dict[str, Any]) -> str:
     end_date = _esc(str(meta.get("end_date") or "-"))
     status_label = _esc(str(meta.get("status_label") or "-"))
     printed_at = _esc(str(meta.get("printed_at") or "-"))
+    price_label = _esc(str(meta.get("price_label") or "ราคาทุน"))
 
     left = f"""<td class="info-left">
   <div class="info-panel">
@@ -132,6 +155,7 @@ def _report_info_html(meta: Dict[str, Any]) -> str:
   <div class="info-panel">
     <div class="info-row"><span class="info-label">ช่วงวันที่</span><span class="info-value">{start_date} ถึง {end_date}</span></div>
     <div class="info-row"><span class="info-label">สถานะ</span><span class="info-value">{status_label}</span></div>
+    <div class="info-row"><span class="info-label">ใช้ราคา</span><span class="info-value">{price_label}</span></div>
     <div class="info-row"><span class="info-label">พิมพ์เมื่อ</span><span class="info-value">{printed_at}</span></div>
   </div>
 </td>"""
@@ -368,6 +392,27 @@ body {{
     width: 30mm;
 }}
 
+.col-price {{
+    width: 22mm;
+}}
+
+.col-cnt {{
+    width: 18mm;
+}}
+
+.col-img {{
+    width: 16mm;
+    padding: 0.5mm !important;
+}}
+
+.item-img {{
+    max-width: 14mm;
+    max-height: 10mm;
+    object-fit: contain;
+    display: block;
+    margin: 0 auto;
+}}
+
 .signature-block {{
     width: 100%;
     border-collapse: collapse;
@@ -417,16 +462,52 @@ body {{
     return CSS(string=css_string, font_config=font_config)
 
 
-def _build_html(delivery: Dict[str, Any], company: Dict[str, Any], pages: List[List]) -> str:
+def _build_html(
+    delivery: Dict[str, Any],
+    company: Dict[str, Any],
+    pages: List[List],
+    opts: Dict[str, Any],
+) -> str:
     logo_html = _logo_html(company.get("logo"))
     company_html = _company_html(company)
     info_html = _info_html(delivery)
     notes = _esc(delivery.get("notes") or "-")
     status_label = _status_label(delivery.get("status"))
 
+    show_image = bool(opts.get("show_image"))
+    show_price = bool(opts.get("show_price"))
+    price_field = opts.get("price_field") or "wholesale_price"
+    price_label = opts.get("price_label") or "ราคา"
+
+    image_head = '<th class="col-img">รูป</th>' if show_image else ""
+    price_head = (
+        f'<th class="col-price">{_esc(price_label)}/หน่วย</th>'
+        f'<th class="col-price">จำนวนเงิน</th>'
+        if show_price
+        else ""
+    )
+
+    # ยอดรวมทั้งใบ (คิดจากทุกหน้า ไม่ใช่เฉพาะหน้าปัจจุบัน)
+    grand_total = 0.0
+    if show_price:
+        for page_items in pages:
+            for it in page_items:
+                grand_total += _line_total(it, price_field)
+
     page_blocks = ""
     for page_index, page_items in enumerate(pages):
-        rows_html = _table_rows(page_items, page_index)
+        rows_html = _table_rows(page_items, page_index, show_image, show_price, price_field)
+        total_html = ""
+        if show_price and page_index == len(pages) - 1:
+            # ครอบคลุม ลำดับ..หน่วย + คอลัมน์ราคา/หน่วย (+รูป ถ้าเปิด)
+            span = 6 + (1 if show_image else 0)
+            total_html = (
+                f'<tr><td colspan="{span}" style="text-align:right;font-weight:bold;'
+                f'background:#f5f5f5;">รวมเป็นเงินทั้งสิ้น</td>'
+                f'<td style="text-align:right;font-weight:bold;background:#f5f5f5;">'
+                f'{_money(grand_total)}</td>'
+                f'<td style="background:#f5f5f5;"></td></tr>'
+            )
         page_blocks += f"""
 <div class="page">
   <div class="sheet">
@@ -449,13 +530,15 @@ def _build_html(delivery: Dict[str, Any], company: Dict[str, Any], pages: List[L
         <tr>
           <th class="col-no">ลำดับ</th>
           <th class="col-code">รหัสสินค้า</th>
+          {image_head}
           <th>รายการสินค้า</th>
           <th class="col-qty">จำนวน</th>
           <th class="col-unit">หน่วย</th>
+          {price_head}
           <th class="col-note">หมายเหตุ</th>
         </tr>
       </thead>
-      <tbody>{rows_html}</tbody>
+      <tbody>{rows_html}{total_html}</tbody>
     </table>
     <table class="signature-block">
       <tr>
@@ -486,7 +569,13 @@ def _build_html(delivery: Dict[str, Any], company: Dict[str, Any], pages: List[L
 </html>"""
 
 
-def _table_rows(items: List[Dict], page_index: int) -> str:
+def _table_rows(
+    items: List[Dict],
+    page_index: int,
+    show_image: bool = True,
+    show_price: bool = False,
+    price_field: str = "wholesale_price",
+) -> str:
     rows = ""
     for row_index in range(PAGE_SIZE):
         item = items[row_index] if row_index < len(items) else None
@@ -494,20 +583,53 @@ def _table_rows(items: List[Dict], page_index: int) -> str:
             no = page_index * PAGE_SIZE + row_index + 1
             code = _esc(str(item.get("product_code") or "-"))
             name = _esc(str(item.get("product_name") or ""))
-            qty = _esc(str(item.get("quantity") or ""))
+            qty = _item_qty_label(item)
             unit = _esc(str(item.get("unit") or ""))
             note = _esc(str(item.get("note") or ""))
+            img_cell = (
+                f'<td class="center col-img">{_item_image_html(item.get("image_url"))}</td>'
+                if show_image
+                else ""
+            )
+            price_cells = ""
+            if show_price:
+                price_cells = (
+                    f'<td style="text-align:right;">{_money(item.get(price_field))}</td>'
+                    f'<td style="text-align:right;">{_money(_line_total(item, price_field))}</td>'
+                )
             rows += f"""<tr>
   <td class="center">{no}</td>
   <td class="center">{code}</td>
+  {img_cell}
   <td>{name}</td>
   <td class="center">{qty}</td>
   <td class="center">{unit}</td>
+  {price_cells}
   <td>{note}</td>
 </tr>"""
         else:
-            rows += "<tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>"
+            blanks = 6 + (1 if show_image else 0) + (2 if show_price else 0)
+            rows += "<tr>" + ("<td></td>" * blanks) + "</tr>"
     return rows
+
+
+def _line_total(item: Dict[str, Any], price_field: str) -> float:
+    try:
+        return float(item.get("quantity") or 0) * float(item.get(price_field) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _item_image_html(image_url: Optional[str]) -> str:
+    if not image_url:
+        return ""
+    try:
+        data_uri = _logo_as_data_uri(image_url)
+        if data_uri:
+            return f'<img class="item-img" src="{data_uri}" alt="" />'
+    except Exception:
+        pass
+    return ""
 
 
 def _company_html(company: Dict[str, Any]) -> str:
@@ -641,6 +763,35 @@ def _product_code_sort_key(item: Dict[str, Any]) -> tuple:
     digits = [ch for ch in code if ch.isdigit()]
     number = int("".join(digits)) if digits else None
     return (number is None, number or 0, code.lower())
+
+
+def _qty(value: Any) -> str:
+    """จำนวนแบบตัดศูนย์ท้ายทิ้ง: 12 -> '12', 7.6000 -> '7.6', 1.3158 -> '1.3158'"""
+    try:
+        num = float(value or 0)
+    except (TypeError, ValueError):
+        return "0"
+    text = f"{num:,.4f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _item_qty_label(item: Dict[str, Any]) -> str:
+    """แสดงจำนวนตามที่ผู้ใช้กรอก ถ้ากรอกคนละหน่วยกับหน่วยสินค้าให้วงเล็บหน่วยฐานต่อท้าย"""
+    base_qty = item.get("quantity")
+    base_unit = str(item.get("unit") or "").strip()
+    input_qty = item.get("input_quantity")
+    input_unit = str(item.get("input_unit") or "").strip()
+
+    if input_qty is not None and input_unit and input_unit != base_unit:
+        return f"{_qty(input_qty)} {_esc(input_unit)} ({_qty(base_qty)} {_esc(base_unit)})"
+    return _qty(base_qty)
+
+
+def _money(value: Any) -> str:
+    try:
+        return f"{float(value or 0):,.2f}"
+    except (TypeError, ValueError):
+        return "0.00"
 
 
 def _esc(text: str) -> str:

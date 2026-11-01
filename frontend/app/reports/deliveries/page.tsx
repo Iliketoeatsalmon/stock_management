@@ -6,13 +6,16 @@ import { Header } from "@/components/layout/header"
 import { api, API_URL } from "@/lib/api"
 import { FileText, Printer, RefreshCcw } from "lucide-react"
 import { DatePicker } from "@/components/ui/date-picker"
+import { formatQty } from "@/lib/units"
 
 interface DeliveryRow {
   product_id: number
   product_code: string
   product_name: string
   unit?: string
+  unit_price: number
   total_quantity: number
+  total_value: number
   delivery_count: number
 }
 
@@ -21,6 +24,12 @@ const STATUS_OPTIONS = [
   { value: "", label: "ทุกสถานะ" },
   { value: "draft", label: "ร่าง" },
   { value: "cancelled", label: "ยกเลิก" },
+]
+
+const PRICE_TYPES = [
+  { value: "cost", label: "ราคาทุน" },
+  { value: "wholesale", label: "ราคาส่ง" },
+  { value: "retail", label: "ราคาปลีก" },
 ]
 
 export default function DeliveryReportPage() {
@@ -38,10 +47,12 @@ export default function DeliveryReportPage() {
     start_date: firstDay.toISOString().split("T")[0],
     end_date: today.toISOString().split("T")[0],
     status: "confirmed",
+    price_type: "cost",
   })
-  const [data, setData] = useState<{ rows: DeliveryRow[]; total_quantity: number; delivery_count: number }>({
+  const [data, setData] = useState<{ rows: DeliveryRow[]; total_quantity: number; total_value: number; delivery_count: number }>({
     rows: [],
     total_quantity: 0,
+    total_value: 0,
     delivery_count: 0,
   })
   const [loading, setLoading] = useState(false)
@@ -66,6 +77,7 @@ export default function DeliveryReportPage() {
     if (useDateRange && filter.start_date) params.append("start_date", filter.start_date)
     if (useDateRange && filter.end_date) params.append("end_date", filter.end_date)
     if (filter.status) params.append("status", filter.status)
+    if (filter.price_type) params.append("price_type", filter.price_type)
     return params
   }
 
@@ -100,6 +112,7 @@ export default function DeliveryReportPage() {
     ? customers.find((c) => c.id === filter.customer_id)?.name || "-"
     : "ทั้งหมด"
   const statusLabel = STATUS_OPTIONS.find((s) => s.value === filter.status)?.label || "-"
+  const priceLabel = PRICE_TYPES.find((p) => p.value === filter.price_type)?.label || "ราคาทุน"
 
   const rangeText = useDateRange
     ? `${filter.start_date || "-"} ถึง ${filter.end_date || "-"}`
@@ -165,6 +178,20 @@ export default function DeliveryReportPage() {
                   ))}
                 </select>
               </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">ใช้ราคา</label>
+                <select
+                  value={filter.price_type}
+                  onChange={(e) => setFilter({ ...filter, price_type: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  {PRICE_TYPES.map((p) => (
+                    <option key={p.value} value={p.value}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="flex items-end">
                 <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
                   <input
@@ -213,10 +240,12 @@ export default function DeliveryReportPage() {
                   หน่วยงาน: {customerName}
                   {" | "}ช่วง: {rangeText}
                   {" | "}สถานะ: {statusLabel}
+                  {" | "}ใช้ราคา: {priceLabel}
                 </div>
                 <div className="font-semibold text-blue-700">
                   จำนวนใบส่งของ: {data.delivery_count?.toLocaleString()} | รวมจำนวน:{" "}
-                  {data.total_quantity?.toLocaleString()} ชิ้น
+                  {formatQty(data.total_quantity)} ชิ้น | มูลค่ารวม:{" "}
+                  {data.total_value?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท
                 </div>
               </div>
               <div className="overflow-x-auto border border-gray-200 rounded-lg">
@@ -228,19 +257,21 @@ export default function DeliveryReportPage() {
                       <th className="border border-gray-200 px-3 py-2">ชื่อสิ่งของ</th>
                       <th className="border border-gray-200 px-3 py-2 w-20">หน่วย</th>
                       <th className="border border-gray-200 px-3 py-2 w-28 text-right">จำนวนรวม</th>
+                      <th className="border border-gray-200 px-3 py-2 w-28 text-right">{priceLabel}/หน่วย</th>
+                      <th className="border border-gray-200 px-3 py-2 w-32 text-right">มูลค่ารวม</th>
                       <th className="border border-gray-200 px-3 py-2 w-24 text-center">จำนวนครั้ง</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                           กำลังโหลด...
                         </td>
                       </tr>
                     ) : data.rows.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                           <FileText className="w-6 h-6 mx-auto mb-2 text-gray-300" />
                           ไม่มีข้อมูล
                         </td>
@@ -253,7 +284,13 @@ export default function DeliveryReportPage() {
                           <td className="border border-gray-200 px-3 py-2">{row.product_name}</td>
                           <td className="border border-gray-200 px-3 py-2">{row.unit || "-"}</td>
                           <td className="border border-gray-200 px-3 py-2 text-right font-semibold text-gray-900">
-                            {row.total_quantity?.toLocaleString()}
+                            {formatQty(row.total_quantity)}
+                          </td>
+                          <td className="border border-gray-200 px-3 py-2 text-right">
+                            {row.unit_price?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="border border-gray-200 px-3 py-2 text-right font-semibold text-gray-900">
+                            {row.total_value?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </td>
                           <td className="border border-gray-200 px-3 py-2 text-center">{row.delivery_count?.toLocaleString()}</td>
                         </tr>
@@ -263,11 +300,19 @@ export default function DeliveryReportPage() {
                 </table>
               </div>
 
-              <div className="mt-6 flex justify-center print:mt-10">
-                <div className="border border-gray-400 rounded-md overflow-hidden min-w-[50%]">
+              <div className="mt-6 flex flex-col sm:flex-row justify-center gap-3 print:mt-10">
+                <div className="border border-gray-400 rounded-md overflow-hidden min-w-[45%]">
                   <div className="grid grid-cols-2 text-center text-sm font-semibold">
                     <div className="border-r border-gray-400 px-4 py-3 text-pink-600">รวมจำนวนทั้งสิ้น</div>
-                    <div className="px-4 py-3 text-pink-600">{data.total_quantity?.toLocaleString()} ชิ้น</div>
+                    <div className="px-4 py-3 text-pink-600">{formatQty(data.total_quantity)} ชิ้น</div>
+                  </div>
+                </div>
+                <div className="border border-gray-400 rounded-md overflow-hidden min-w-[45%]">
+                  <div className="grid grid-cols-2 text-center text-sm font-semibold">
+                    <div className="border-r border-gray-400 px-4 py-3 text-pink-600">มูลค่ารวมทั้งสิ้น</div>
+                    <div className="px-4 py-3 text-pink-600">
+                      {data.total_value?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท
+                    </div>
                   </div>
                 </div>
               </div>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { Menu, User, LogOut } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { NotificationBell } from "@/components/layout/notification-bell"
 
 interface UserData {
   full_name: string
@@ -42,6 +43,7 @@ export function Header({ title }: { title: string }) {
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
+          <NotificationBell />
           <button
             onClick={handleLogout}
             className="flex items-center gap-1.5 px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
