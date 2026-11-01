@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     secret_key: str = "your-super-secret-key-change-in-production"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 480
+    # ติ๊ก "จดจำการเข้าสู่ระบบ" ตอน login = ไม่ต้อง login ใหม่ภายในจำนวนวันนี้
+    remember_token_expire_days: int = 30
 
     # API key ที่ระบบภายนอก (ERP) ใช้เรียก /api/catalog ผ่าน header X-API-Key
     # ว่าง = ปิดการใช้งาน catalog API ทั้งหมด (ค่าเริ่มต้นปลอดภัย ไม่มี key ฝังในโค้ด)
@@ -245,9 +247,14 @@ def verify_password(plain_password, hashed_password):
 def get_password_hash(password):
     return pwd_context.hash(password)
 
-def create_access_token(data: dict):
+def create_access_token(data: dict, remember: bool = False):
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes)
+    lifetime = (
+        timedelta(days=settings.remember_token_expire_days)
+        if remember
+        else timedelta(minutes=settings.access_token_expire_minutes)
+    )
+    expire = datetime.utcnow() + lifetime
     # JWT spec requires subject to be a string; convert here to avoid jose JWTClaimsError
     if "sub" in to_encode:
         to_encode["sub"] = str(to_encode["sub"])
@@ -286,6 +293,7 @@ def normalize_optional_str(value: Optional[str]) -> Optional[str]:
 class LoginRequest(BaseModel):
     username: str
     password: str
+    remember: bool = False
 
 class UserCreate(BaseModel):
     username: str
@@ -493,7 +501,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     logger.info(f"Successful login for user: {request.username}")
-    token = create_access_token({"sub": user.id})
+    token = create_access_token({"sub": user.id}, remember=request.remember)
     return {
         "access_token": token,
         "token_type": "bearer",

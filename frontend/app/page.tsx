@@ -10,6 +10,8 @@ import { api } from "@/lib/api"
 export default function LoginPage() {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
+  // ค่าเริ่มต้นติ๊กไว้ ผู้ใช้ส่วนใหญ่ใช้เครื่องตัวเอง ไม่อยากกรอกรหัสทุกวัน
+  const [remember, setRemember] = useState(true)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
   const router = useRouter()
@@ -27,7 +29,7 @@ export default function LoginPage() {
     setError("")
 
     try {
-      const data = await api.post("/auth/login", { username, password })
+      const data = await api.post("/auth/login", { username, password, remember })
       localStorage.setItem("token", data.access_token)
       localStorage.setItem("user", JSON.stringify(data.user))
       router.push("/dashboard")
@@ -68,10 +70,14 @@ export default function LoginPage() {
             )}
 
             <div>
-              <label className="block text-sm font-semibold text-slate-200 mb-2">ชื่อผู้ใช้</label>
+              <label htmlFor="username" className="block text-sm font-semibold text-slate-200 mb-2">ชื่อผู้ใช้</label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-500" />
+                {/* id/name/autoComplete ทำให้เบราว์เซอร์รู้ว่าเป็นฟอร์ม login แล้วเสนอบันทึก/กรอกรหัสให้ */}
                 <input
+                  id="username"
+                  name="username"
+                  autoComplete="username"
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
@@ -83,10 +89,13 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-200 mb-2">รหัสผ่าน</label>
+              <label htmlFor="password" className="block text-sm font-semibold text-slate-200 mb-2">รหัสผ่าน</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-500" />
                 <input
+                  id="password"
+                  name="password"
+                  autoComplete="current-password"
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -96,6 +105,18 @@ export default function LoginPage() {
                 />
               </div>
             </div>
+
+            <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                name="remember"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+                className="w-4 h-4 accent-green-500"
+              />
+              จดจำการเข้าสู่ระบบ 30 วัน
+            </label>
+            <p className="-mt-2 text-xs text-slate-500">ไม่ควรติ๊กถ้าใช้คอมพิวเตอร์ร่วมกับคนอื่น</p>
 
             <button
               type="submit"
