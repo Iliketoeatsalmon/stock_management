@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
@@ -22,6 +23,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 
 from pdf_generator import generate_delivery_pdf, generate_delivery_report_pdf
+from product_codes import next_product_code
 
 # Setup logging
 # Log directory is configurable so the app also runs outside the Linux container
@@ -148,6 +150,9 @@ UNIT_MIGRATION_STATEMENTS = [
     "ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS item_kind VARCHAR(20) NOT NULL DEFAULT 'CONSUMABLE'",
     # ธงบอกว่า customer แถวนี้คือ "ไซต์งาน" จริง ไม่ใช่ออฟฟิศตัวเองหรือชื่อบุคคล
     "ALTER TABLE IF EXISTS customers ADD COLUMN IF NOT EXISTS is_site BOOLEAN NOT NULL DEFAULT false",
+    # รหัสสินค้าเดิมก่อนรันรหัสใหม่ (เติมค่าโดย sql/004_renumber_product_codes.sql)
+    # ใช้ค้นหาด้วยรหัสเดิมและให้ ERP จับคู่รหัสเก่า-ใหม่
+    "ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS legacy_code VARCHAR(50)",
     # เก็บค่าที่ผู้ใช้กรอกจริงไว้ด้วย เพื่อให้เอกสารพิมพ์ตรงกับที่กรอก
     "ALTER TABLE IF EXISTS delivery_items ADD COLUMN IF NOT EXISTS input_quantity DECIMAL(12,4)",
     "ALTER TABLE IF EXISTS delivery_items ADD COLUMN IF NOT EXISTS input_unit VARCHAR(20)",
@@ -311,7 +316,8 @@ class CompanySettingsUpdate(BaseModel):
     logo: Optional[str] = None
 
 class ProductCreate(BaseModel):
-    code: str
+    # ระบบสร้างรหัสให้เอง ค่าที่ client ส่งมาจะถูกละทิ้ง (เก็บ field ไว้ให้ client เก่ายังส่งได้ไม่ error)
+    code: Optional[str] = None
     name: str
     description: Optional[str] = None
     unit: str = "ชิ้น"
@@ -621,6 +627,7 @@ def get_products(
             p.litre_per_unit,
             p.category,
             p.item_kind,
+            p.legacy_code,
             p.is_active,
             p.notify_enabled,
             p.created_at,
@@ -643,7 +650,7 @@ def get_products(
 
     if search:
         query += """
-            AND (p.name ILIKE :search OR p.code ILIKE :search)
+            AND (p.name ILIKE :search OR p.code ILIKE :search OR p.legacy_code ILIKE :search)
         """
         params["search"] = f"%{search}%"
 
@@ -662,6 +669,7 @@ def get_products(
             p.litre_per_unit,
             p.category,
             p.item_kind,
+            p.legacy_code,
             p.is_active,
             p.notify_enabled,
             p.created_at,
@@ -828,34 +836,39 @@ def get_product(product_id: int, db: Session = Depends(get_db), user = Depends(g
         raise HTTPException(status_code=404, detail="Product not found")
     return dict(product._mapping)
 
+PRODUCT_CODE_MAX_ATTEMPTS = 5
+
+
 @app.post("/api/products")
 def create_product(product: ProductCreate, db: Session = Depends(get_db), user = Depends(get_current_user)):
-    code = product.code.strip()
-    if not code:
-        raise HTTPException(status_code=400, detail="กรุณาระบุรหัสสินค้า")
-
-    # Code is permanent once set (checked against every product ever created,
-    # active or not) so a code can never be reused for a different item later.
-    existing = db.execute(
-        text("SELECT id, name, is_active FROM products WHERE TRIM(code) = :code"),
-        {"code": code},
-    ).fetchone()
-    if existing:
-        status_label = "ใช้งานอยู่" if existing.is_active else "ถูกลบ/ปิดใช้งานแล้ว"
-        raise HTTPException(
-            status_code=400,
-            detail=f'รหัส "{code}" ถูกใช้แล้วโดยสินค้า "{existing.name}" ({status_label}) กรุณาใช้รหัสอื่น',
-        )
-
     data = product.model_dump()
-    data["code"] = code
-    result = db.execute(text("""
-        INSERT INTO products (code, name, description, unit, min_stock, image_url, cost_price, wholesale_price, retail_price, litre_per_unit, category, item_kind)
-        VALUES (:code, :name, :description, :unit, :min_stock, :image_url, :cost_price, :wholesale_price, :retail_price, :litre_per_unit, :category, :item_kind)
-        RETURNING *
-    """), data)
-    db.commit()
-    return dict(result.fetchone()._mapping)
+
+    # รหัสสร้างโดยระบบเสมอ ไม่รับจาก client เพื่อไม่ให้เกิดรหัสซ้ำ/พิมพ์ผิดแบบที่เคยเป็น
+    # รหัสที่เคยใช้แล้ว (รวมสินค้าที่ปิดใช้งาน) จะไม่ถูกนำกลับมาใช้ เพราะเลขรันจาก MAX ของทุกแถว
+    for _ in range(PRODUCT_CODE_MAX_ATTEMPTS):
+        data["code"] = next_product_code(db)
+
+        # กันกรณีถูกสร้างพร้อมกันก่อนที่จะมี UNIQUE(code) ในฐานข้อมูล
+        taken = db.execute(
+            text("SELECT 1 FROM products WHERE TRIM(code) = :code"), {"code": data["code"]}
+        ).fetchone()
+        if taken:
+            continue
+
+        try:
+            result = db.execute(text("""
+                INSERT INTO products (code, name, description, unit, min_stock, image_url, cost_price, wholesale_price, retail_price, litre_per_unit, category, item_kind)
+                VALUES (:code, :name, :description, :unit, :min_stock, :image_url, :cost_price, :wholesale_price, :retail_price, :litre_per_unit, :category, :item_kind)
+                RETURNING *
+            """), data)
+            db.commit()
+        except IntegrityError:
+            # UNIQUE(code) ชนเพราะมีคนสร้างพร้อมกัน ลองเลขถัดไป
+            db.rollback()
+            continue
+        return dict(result.fetchone()._mapping)
+
+    raise HTTPException(status_code=503, detail="สร้างรหัสสินค้าไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
 
 @app.put("/api/products/{product_id}")
 def update_product(product_id: int, product: ProductUpdate, db: Session = Depends(get_db), user = Depends(get_current_user)):
@@ -956,8 +969,11 @@ def get_catalog(
     has_item_kind = column_exists(db, "products", "item_kind")
     has_is_site = column_exists(db, "customers", "is_site")
 
+    has_legacy_code = column_exists(db, "products", "legacy_code")
+
     category_sql = "p.category" if has_category else "NULL::varchar"
     item_kind_sql = "p.item_kind" if has_item_kind else "'CONSUMABLE'::varchar"
+    legacy_code_sql = "p.legacy_code" if has_legacy_code else "NULL::varchar"
 
     conditions = []
     params: dict = {"limit": limit, "offset": offset}
@@ -975,7 +991,7 @@ def get_catalog(
 
     rows = db.execute(text(f"""
         SELECT
-            p.id, p.code, p.name, p.description, p.unit,
+            p.id, p.code, {legacy_code_sql} AS legacy_code, p.name, p.description, p.unit,
             {category_sql} AS category,
             {item_kind_sql} AS item_kind,
             p.image_url,
@@ -1000,6 +1016,8 @@ def get_catalog(
         items.append({
             "id": r.id,
             "code": r.code,
+            # รหัสก่อนรันใหม่ (null สำหรับสินค้าที่สร้างหลังเปลี่ยนระบบรหัส) ใช้จับคู่ข้อมูลเก่า
+            "legacy_code": r.legacy_code,
             "name": r.name,
             "description": r.description or "",
             "unit": r.unit,
@@ -1080,6 +1098,7 @@ def get_catalog(
             "has_category": has_category,
             "has_item_kind": has_item_kind,
             "has_is_site": has_is_site,
+            "has_legacy_code": has_legacy_code,
         },
         "notes": {
             "qty_outstanding": (

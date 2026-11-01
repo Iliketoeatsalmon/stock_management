@@ -39,7 +39,8 @@ MSYS_NO_PATHCONV=1 docker run --rm \
     -w //tmp/work \
     -e TEST_DATABASE_URL="postgresql+psycopg2://testuser:testonly@testdb:5432/testdb" \
     python:3.11-slim bash -c "
-        cp -r /src/tests /tmp/work/tests; cp /src/erp_reports.py /tmp/work/
+        cp -r /src/tests /tmp/work/tests; cp -r /src/sql /tmp/work/sql
+        cp /src/erp_reports.py /src/product_codes.py /tmp/work/
         pip install -q pytest sqlalchemy psycopg2-binary fastapi 2>/dev/null
         python -m pytest tests -v --no-header
     "

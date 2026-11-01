@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS products (
     litre_per_unit DECIMAL(10,3), -- ลิตรต่อ 1 หน่วย (NULL = ไม่มีการแปลงหน่วย)
     category VARCHAR(100),        -- หมวดหมู่สำหรับ catalog
     item_kind VARCHAR(20) NOT NULL DEFAULT 'CONSUMABLE', -- REUSABLE = ต้องตามเก็บคืน
+    legacy_code VARCHAR(50),      -- รหัสเดิมก่อนรันรหัสใหม่ (ดู 004_renumber_product_codes.sql)
     image_url VARCHAR(255),
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
