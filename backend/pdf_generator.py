@@ -7,7 +7,9 @@ from urllib.parse import unquote, urlparse
 from weasyprint import CSS, HTML
 from weasyprint.text.fonts import FontConfiguration
 
-PAGE_SIZE = 20
+# ใบส่งของที่รายการน้อย เติมแถวว่างให้ถึงจำนวนนี้ (ไว้เขียนเพิ่มด้วยมือ)
+# ไม่เติมเต็มหน้าแบบเดิม 20 แถว เพราะแถวที่มีรูป/ชื่อยาวสูงกว่า ทำให้ล้นไปหน้าใหม่ที่ไม่มีหัวเอกสาร
+MIN_ROWS = 10
 
 FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "fonts", "NotoSansThai-Regular.ttf")
 UPLOADS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "uploads"))
@@ -28,11 +30,10 @@ def generate_delivery_pdf(
 ) -> bytes:
     opts = {**DEFAULT_DELIVERY_OPTIONS, **(options or {})}
     items = sorted(delivery.get("items", []) or [], key=_product_code_sort_key)
-    pages = _chunk(items, PAGE_SIZE)
 
     font_config = FontConfiguration()
     css = _build_css(font_config)
-    html_str = _build_html(delivery, company, pages, opts)
+    html_str = _build_html(delivery, company, items, opts)
     return HTML(string=html_str).write_pdf(stylesheets=[css], font_config=font_config)
 
 
@@ -372,6 +373,24 @@ body {{
     text-align: center;
 }}
 
+.items-table tbody tr {{
+    break-inside: avoid;
+}}
+
+/* ใบส่งของ: หัวเอกสาร (thead) และช่องลงชื่อ (tfoot) อยู่ในตารางเดียวกับรายการสินค้า
+   WeasyPrint พิมพ์ thead/tfoot ซ้ำทุกหน้าให้เอง */
+.items-table td.doc-wrap {{
+    padding: 0;
+    height: auto;
+    border: 0.5pt solid #a0a0a0;
+    vertical-align: top;
+    overflow: visible;
+}}
+
+.items-table td.doc-wrap .signature-block {{
+    border-top: none;
+}}
+
 .col-no {{
     width: 12mm;
 }}
@@ -465,7 +484,7 @@ body {{
 def _build_html(
     delivery: Dict[str, Any],
     company: Dict[str, Any],
-    pages: List[List],
+    items: List[Dict],
     opts: Dict[str, Any],
 ) -> str:
     logo_html = _logo_html(company.get("logo"))
@@ -478,7 +497,17 @@ def _build_html(
     show_price = bool(opts.get("show_price"))
     price_field = opts.get("price_field") or "wholesale_price"
     price_label = opts.get("price_label") or "ราคา"
+    col_count = 6 + (1 if show_image else 0) + (2 if show_price else 0)
 
+    # ตารางเดียวทั้งใบ → ต้องกำหนดความกว้างคอลัมน์ผ่าน colgroup
+    # (table-layout: fixed ใช้แถวแรกเป็นตัวกำหนด ซึ่งแถวแรกคือหัวเอกสารที่ colspan ทั้งแถว)
+    cols = (
+        '<col class="col-no" /><col class="col-code" />'
+        + ('<col class="col-img" />' if show_image else "")
+        + '<col /><col class="col-qty" /><col class="col-unit" />'
+        + ('<col class="col-price" /><col class="col-price" />' if show_price else "")
+        + '<col class="col-note" />'
+    )
     image_head = '<th class="col-img">รูป</th>' if show_image else ""
     price_head = (
         f'<th class="col-price">{_esc(price_label)}/หน่วย</th>'
@@ -487,100 +516,97 @@ def _build_html(
         else ""
     )
 
-    # ยอดรวมทั้งใบ (คิดจากทุกหน้า ไม่ใช่เฉพาะหน้าปัจจุบัน)
-    grand_total = 0.0
+    rows_html = _table_rows(items, show_image, show_price, price_field)
+    total_html = ""
     if show_price:
-        for page_items in pages:
-            for it in page_items:
-                grand_total += _line_total(it, price_field)
-
-    page_blocks = ""
-    for page_index, page_items in enumerate(pages):
-        rows_html = _table_rows(page_items, page_index, show_image, show_price, price_field)
-        total_html = ""
-        if show_price and page_index == len(pages) - 1:
-            # ครอบคลุม ลำดับ..หน่วย + คอลัมน์ราคา/หน่วย (+รูป ถ้าเปิด)
-            span = 6 + (1 if show_image else 0)
-            total_html = (
-                f'<tr><td colspan="{span}" style="text-align:right;font-weight:bold;'
-                f'background:#f5f5f5;">รวมเป็นเงินทั้งสิ้น</td>'
-                f'<td style="text-align:right;font-weight:bold;background:#f5f5f5;">'
-                f'{_money(grand_total)}</td>'
-                f'<td style="background:#f5f5f5;"></td></tr>'
-            )
-        page_blocks += f"""
-<div class="page">
-  <div class="sheet">
-    <table class="row-table header-top">
-      <tr>
-        <td class="header-logo">{logo_html}</td>
-        <td class="header-company">{company_html}</td>
-      </tr>
-    </table>
-    <table class="row-table header-info">
-      <tr>{info_html}</tr>
-    </table>
-    <div class="notes-block">หมายเหตุ: {notes}</div>
-    <div class="title-row">
-      <span class="doc-title">ใบส่งสินค้า</span>
-      <span class="status-badge">{_esc(status_label)}</span>
-    </div>
-    <table class="items-table">
-      <thead>
-        <tr>
-          <th class="col-no">ลำดับ</th>
-          <th class="col-code">รหัสสินค้า</th>
-          {image_head}
-          <th>รายการสินค้า</th>
-          <th class="col-qty">จำนวน</th>
-          <th class="col-unit">หน่วย</th>
-          {price_head}
-          <th class="col-note">หมายเหตุ</th>
-        </tr>
-      </thead>
-      <tbody>{rows_html}{total_html}</tbody>
-    </table>
-    <table class="signature-block">
-      <tr>
-        <td class="sig-left">
-          <div class="signature-panel">
-            <span class="signature-title">ส่วนของลูกค้า / ผู้รับสินค้า</span>
-            <span class="sig-line">ลงชื่อ <span class="sig-field"></span></span>
-            <span class="sig-line sig-date">วันที่ <span class="sig-field"></span></span>
-          </div>
-        </td>
-        <td>
-          <div class="signature-panel">
-            <span class="signature-title">ส่วนของบริษัท / ผู้ส่งสินค้า</span>
-            <span class="sig-line">ลงชื่อ <span class="sig-field"></span></span>
-            <span class="sig-line sig-date">วันที่ <span class="sig-field"></span></span>
-          </div>
-        </td>
-      </tr>
-    </table>
-  </div>
-</div>
-"""
+        grand_total = sum(_line_total(it, price_field) for it in items)
+        # ครอบคลุม ลำดับ..หน่วย + คอลัมน์ราคา/หน่วย (+รูป ถ้าเปิด)
+        span = 6 + (1 if show_image else 0)
+        total_html = (
+            f'<tr><td colspan="{span}" style="text-align:right;font-weight:bold;'
+            f'background:#f5f5f5;">รวมเป็นเงินทั้งสิ้น</td>'
+            f'<td style="text-align:right;font-weight:bold;background:#f5f5f5;">'
+            f'{_money(grand_total)}</td>'
+            f'<td style="background:#f5f5f5;"></td></tr>'
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="th">
 <head><meta charset="utf-8" /><title>ใบส่งสินค้า</title></head>
-<body>{page_blocks}</body>
+<body>
+<table class="items-table">
+  <colgroup>{cols}</colgroup>
+  <thead>
+    <tr>
+      <td class="doc-wrap" colspan="{col_count}">
+        <table class="row-table header-top">
+          <tr>
+            <td class="header-logo">{logo_html}</td>
+            <td class="header-company">{company_html}</td>
+          </tr>
+        </table>
+        <table class="row-table header-info">
+          <tr>{info_html}</tr>
+        </table>
+        <div class="notes-block">หมายเหตุ: {notes}</div>
+        <div class="title-row">
+          <span class="doc-title">ใบส่งสินค้า</span>
+          <span class="status-badge">{_esc(status_label)}</span>
+        </div>
+      </td>
+    </tr>
+    <tr>
+      <th class="col-no">ลำดับ</th>
+      <th class="col-code">รหัสสินค้า</th>
+      {image_head}
+      <th>รายการสินค้า</th>
+      <th class="col-qty">จำนวน</th>
+      <th class="col-unit">หน่วย</th>
+      {price_head}
+      <th class="col-note">หมายเหตุ</th>
+    </tr>
+  </thead>
+  <tfoot>
+    <tr>
+      <td class="doc-wrap" colspan="{col_count}">
+        <table class="signature-block">
+          <tr>
+            <td class="sig-left">
+              <div class="signature-panel">
+                <span class="signature-title">ส่วนของลูกค้า / ผู้รับสินค้า</span>
+                <span class="sig-line">ลงชื่อ <span class="sig-field"></span></span>
+                <span class="sig-line sig-date">วันที่ <span class="sig-field"></span></span>
+              </div>
+            </td>
+            <td>
+              <div class="signature-panel">
+                <span class="signature-title">ส่วนของบริษัท / ผู้ส่งสินค้า</span>
+                <span class="sig-line">ลงชื่อ <span class="sig-field"></span></span>
+                <span class="sig-line sig-date">วันที่ <span class="sig-field"></span></span>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </tfoot>
+  <tbody>{rows_html}{total_html}</tbody>
+</table>
+</body>
 </html>"""
 
 
 def _table_rows(
     items: List[Dict],
-    page_index: int,
     show_image: bool = True,
     show_price: bool = False,
     price_field: str = "wholesale_price",
 ) -> str:
     rows = ""
-    for row_index in range(PAGE_SIZE):
+    for row_index in range(max(len(items), MIN_ROWS)):
         item = items[row_index] if row_index < len(items) else None
         if item:
-            no = page_index * PAGE_SIZE + row_index + 1
+            no = row_index + 1
             code = _esc(str(item.get("product_code") or "-"))
             name = _esc(str(item.get("product_name") or ""))
             qty = _item_qty_label(item)
@@ -735,12 +761,6 @@ def _resolve_local_path(url: str) -> Optional[str]:
             rel = path[len(prefix):]
             return os.path.join(UPLOADS_DIR, rel)
     return None
-
-
-def _chunk(items: List, size: int) -> List[List]:
-    if not items:
-        return [[]]
-    return [items[i : i + size] for i in range(0, len(items), size)]
 
 
 def _format_date(value: Any) -> str:
