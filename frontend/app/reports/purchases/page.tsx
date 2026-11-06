@@ -73,7 +73,7 @@ export default function PurchaseReportPage() {
       <div className="print:hidden">
         <Sidebar />
       </div>
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         <div className="print:hidden">
           <Header title="รายงานการซื้อ" />
         </div>

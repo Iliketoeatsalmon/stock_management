@@ -37,7 +37,8 @@ const nextConfig = {
   },
 
   webpack: (config) => {
-    config.resolve.alias = { ...config.resolve.alias, "@": path.resolve(__dirname) }
+    // canvas เป็น optional dependency ฝั่ง Node ของ pdf.js ฝั่งเบราว์เซอร์ไม่ได้ใช้
+    config.resolve.alias = { ...config.resolve.alias, "@": path.resolve(__dirname), canvas: false }
     return config
   },
 }

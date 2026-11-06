@@ -218,12 +218,69 @@ export default function DeliveryDetailPage() {
 
   const displayItems = isDraft ? editItems : sortItemsByCode(delivery.items || [])
 
+  // ใช้ร่วมกันทั้งตาราง (จอใหญ่/พิมพ์) และการ์ด (มือถือ)
+  const removeButton = (index: number) => (
+    <button
+      type="button"
+      onClick={() => removeItem(index)}
+      className="text-red-600 text-xs flex items-center gap-1"
+    >
+      <Minus className="w-3 h-3" /> ลบ
+    </button>
+  )
+
+  const productField = (item: any, index: number) =>
+    isDraft ? (
+      <div className="space-y-1">
+        <ProductSelect
+          products={products}
+          value={item.product_id}
+          onChange={(id) => updateItem(index, "product_id", id)}
+          showStock
+          className="px-2 py-1"
+        />
+      </div>
+    ) : (
+      <div>
+        <div className="font-medium text-gray-900">{item.product_name}</div>
+      </div>
+    )
+
+  const quantityField = (item: any, index: number) => (
+    <QuantityInput
+      value={item.quantity}
+      unit={item.input_unit || unitOptions(products.find((p) => p.id === item.product_id))[0]}
+      product={products.find((p) => p.id === item.product_id)}
+      onChange={({ quantity, unit }) => {
+        setEditItems((prev) => {
+          const next = [...prev]
+          next[index] = { ...next[index], quantity, input_unit: unit }
+          return next
+        })
+      }}
+      className="py-1"
+    />
+  )
+
+  const noteField = (item: any, index: number) => (
+    <div>
+      <label className="text-xs text-gray-500">หมายเหตุ</label>
+      <input
+        type="text"
+        value={item.note || ""}
+        onChange={(e) => updateItem(index, "note", e.target.value)}
+        className="mt-1 w-full px-2 py-1 border border-gray-300 rounded-lg text-sm"
+        placeholder="กรอกหมายเหตุ"
+      />
+    </div>
+  )
+
   return (
     <div className="flex min-h-screen bg-gray-50">
       <div className="print:hidden">
         <Sidebar />
       </div>
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         <Header title="รายละเอียดใบส่งของ" />
 
         <main className="flex-1 p-4 sm:p-6 print:p-0">
@@ -236,7 +293,7 @@ export default function DeliveryDetailPage() {
               .page { box-shadow: none !important; border: none !important; }
               * { color: #000 !important; }
               /* Push the signature down on short documents (but still allow long tables to expand) */
-              .print-area { font-size: 8px; line-height: 1; display: flex; flex-direction: column; min-height: 285mm !important; }
+              .print-area { font-size: 8px; line-height: 1; display: flex; flex-direction: column; min-height: 285mm !important; min-width: 0 !important; }
               .print-table { min-height: 0; flex: 1 1 auto; }
               .print-table th, .print-table td { padding: 1px !important; }
               .print-area .leading-relaxed { line-height: 1.2 !important; }
@@ -288,14 +345,14 @@ export default function DeliveryDetailPage() {
           </div>
 
           <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0 print:overflow-visible print:mx-0 print:px-0">
-          <div className="page print-area bg-white rounded-xl border border-gray-200 p-4 sm:p-6 print:p-0 print:rounded-none print:border print:text-xs flex flex-col min-h-[270mm] min-w-[680px] print:min-w-0">
+          <div className="page print-area bg-white rounded-xl border border-gray-200 p-4 sm:p-6 print:p-0 print:rounded-none print:border print:text-xs flex flex-col sm:min-h-[270mm] sm:min-w-[680px]">
             {/* Header */}
             <div className="border border-gray-400">
-              <div className="flex">
-                <div className="w-1/3 border-r border-gray-400 flex items-center justify-center p-3">
+              <div className="flex flex-col sm:flex-row">
+                <div className="sm:w-1/3 border-b sm:border-b-0 sm:border-r border-gray-400 flex items-center justify-center p-3">
                   <img src={companyInfo.logo} alt="logo" className="max-h-20 object-contain" />
                 </div>
-                <div className="w-2/3 p-3 text-sm print:text-xs leading-relaxed">
+                <div className="sm:w-2/3 p-3 text-sm print:text-xs leading-relaxed">
                   <div className="font-bold text-base">{companyInfo.nameEn}</div>
                   <div className="font-bold text-base text-gray-800">{companyInfo.nameTh}</div>
                   <div>{companyInfo.address}</div>
@@ -306,8 +363,8 @@ export default function DeliveryDetailPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 border-t border-gray-400 text-sm print:text-xs">
-                <div className="p-3 space-y-1 border-r border-gray-400">
+              <div className="grid grid-cols-1 sm:grid-cols-2 border-t border-gray-400 text-sm print:text-xs">
+                <div className="p-3 space-y-1 border-b sm:border-b-0 sm:border-r border-gray-400">
                   <div><strong>Company:</strong> {delivery.customer_name || "-"}</div>
                   <div><strong>Delivery to:</strong> {delivery.customer_name || "-"}</div>
                   <div><strong>Address:</strong> {delivery.customer_address || "-"}</div>
@@ -345,7 +402,34 @@ export default function DeliveryDetailPage() {
             <div className="border border-gray-400 border-b-0 px-3 py-2 font-semibold text-sm print:text-xs bg-gray-50 text-center">
               ใบส่งสินค้า
             </div>
-            <table className="w-full border border-gray-400 text-sm print:text-xs mt-0">
+            {/* มือถือ: ตาราง 6 คอลัมน์แคบเกินไป แสดงเป็นการ์ดแทน */}
+            <div className="sm:hidden print:hidden border border-gray-400 divide-y divide-gray-300 text-sm">
+              {displayItems.map((item: any, index: number) => (
+                <div key={item.id || index} className="p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
+                    <span>
+                      {index + 1}. {item.product_code || "-"}
+                    </span>
+                    {isDraft && removeButton(index)}
+                  </div>
+                  {productField(item, index)}
+                  {isDraft ? (
+                    <>
+                      {quantityField(item, index)}
+                      {noteField(item, index)}
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-gray-700">
+                        จำนวน <strong>{formatQty(item.quantity)}</strong> {item.unit}
+                      </div>
+                      {item.note && <div className="text-gray-500">หมายเหตุ: {item.note}</div>}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+            <table className="hidden sm:table print:table w-full border border-gray-400 text-sm print:text-xs mt-0">
               <thead className="bg-gray-100">
                 <tr>
                   <th className="border border-gray-400 p-2 w-12">ลำดับ</th>
@@ -362,74 +446,19 @@ export default function DeliveryDetailPage() {
                     <td className="border border-gray-300 p-2 text-center align-middle">
                       <div className="flex items-center justify-center gap-2">
                         <span>{index + 1}</span>
-                        {isDraft && (
-                          <button
-                            type="button"
-                            onClick={() => removeItem(index)}
-                            className="text-red-600 text-xs flex items-center gap-1"
-                          >
-                            <Minus className="w-3 h-3" /> ลบ
-                          </button>
-                        )}
+                        {isDraft && removeButton(index)}
                       </div>
                     </td>
                     <td className="border border-gray-300 p-2 text-center align-middle">
                       {item.product_code || "-"}
                     </td>
-                    <td className="border border-gray-300 p-2 align-top">
-                      {isDraft ? (
-                        <div className="space-y-1">
-                          <ProductSelect
-                            products={products}
-                            value={item.product_id}
-                            onChange={(id) => updateItem(index, "product_id", id)}
-                            showStock
-                            className="px-2 py-1"
-                          />
-                        </div>
-                      ) : (
-                        <div>
-                          <div className="font-medium text-gray-900">{item.product_name}</div>
-                        </div>
-                      )}
-                    </td>
+                    <td className="border border-gray-300 p-2 align-top">{productField(item, index)}</td>
                     <td className="border border-gray-300 p-2 text-center align-middle">
-                      {isDraft ? (
-                        <div className="w-36 mx-auto">
-                          <QuantityInput
-                            value={item.quantity}
-                            unit={item.input_unit || unitOptions(products.find((p) => p.id === item.product_id))[0]}
-                            product={products.find((p) => p.id === item.product_id)}
-                            onChange={({ quantity, unit }) => {
-                              setEditItems((prev) => {
-                                const next = [...prev]
-                                next[index] = { ...next[index], quantity, input_unit: unit }
-                                return next
-                              })
-                            }}
-                            className="py-1"
-                          />
-                        </div>
-                      ) : (
-                        formatQty(item.quantity)
-                      )}
+                      {isDraft ? <div className="w-36 mx-auto">{quantityField(item, index)}</div> : formatQty(item.quantity)}
                     </td>
                     <td className="border border-gray-300 p-2 text-center align-middle">{item.unit}</td>
                     <td className="border border-gray-300 p-2 align-top">
-                      {isDraft ? (
-                        <div>
-                          <label className="text-xs text-gray-500">หมายเหตุ</label>
-                          <input
-                            type="text"
-                            value={item.note || ""}
-                            onChange={(e) => updateItem(index, "note", e.target.value)}
-                            className="mt-1 w-full px-2 py-1 border border-gray-300 rounded-lg text-sm"
-                            placeholder="กรอกหมายเหตุ"
-                          />
-                        </div>
-                      ) : (
-                        item.note || ""
-                      )}
+                      {isDraft ? noteField(item, index) : item.note || ""}
                     </td>
                   </tr>
                 ))}

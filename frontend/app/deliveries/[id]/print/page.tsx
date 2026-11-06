@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useParams } from "next/navigation"
 import { API_URL } from "@/lib/api"
+import { PdfPages } from "@/components/ui/pdf-pages"
 
 const PRICE_TYPES = [
   { value: "wholesale", label: "ราคาส่ง" },
@@ -18,6 +19,11 @@ export default function DeliveryPrintPage() {
   const [showImage, setShowImage] = useState(true)
   const [showPrice, setShowPrice] = useState(false)
   const [priceType, setPriceType] = useState("wholesale")
+  const [isTouchDevice, setIsTouchDevice] = useState(false)
+
+  useEffect(() => {
+    setIsTouchDevice(window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768)
+  }, [])
 
   useEffect(() => {
     const id = Array.isArray(params.id) ? params.id[0] : params.id
@@ -143,6 +149,8 @@ export default function DeliveryPrintPage() {
         <div className="flex-1 flex items-center justify-center p-6 text-gray-600">{error}</div>
       ) : !pdfUrl ? (
         <div className="flex-1 flex items-center justify-center p-6 text-gray-600">กำลังสร้าง PDF...</div>
+      ) : isTouchDevice ? (
+        <PdfPages url={pdfUrl} />
       ) : (
         <iframe title="Delivery PDF" src={pdfUrl} className="flex-1 w-full border-0 bg-white min-h-[60vh]" />
       )}
