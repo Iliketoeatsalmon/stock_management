@@ -188,6 +188,44 @@ def _build_css(font_config: FontConfiguration) -> CSS:
     }}
 }}
 
+/* ใบส่งของ: ช่องลงชื่อ + เลขหน้าอยู่ในขอบล่างของกระดาษ → ตำแหน่งเดียวกันทุกหน้า
+   หน้าที่รายการน้อยจะเว้นว่างไว้ แล้วช่องลงชื่อไปอยู่ล่างสุด */
+@page delivery-note {{
+    margin-bottom: 38mm;
+    @bottom-right {{
+        content: none;
+    }}
+    @bottom-center {{
+        content: element(docFooter);
+        vertical-align: top;
+        width: 100%;  /* ไม่งั้นกว้างแค่พอดีเนื้อหา แคบกว่าตาราง */
+    }}
+}}
+
+.delivery-note {{
+    page: delivery-note;
+}}
+
+.doc-footer {{
+    position: running(docFooter);
+    width: 100%;
+}}
+
+.doc-footer .signature-block {{
+    border: 0.5pt solid #a0a0a0;
+}}
+
+.doc-footer .page-no {{
+    text-align: right;
+    font-size: 7.5pt;
+    color: #888;
+    margin-top: 1mm;
+}}
+
+.doc-footer .page-no::after {{
+    content: "หน้า " counter(page) "/" counter(pages);
+}}
+
 * {{
     box-sizing: border-box;
     margin: 0;
@@ -377,18 +415,14 @@ body {{
     break-inside: avoid;
 }}
 
-/* ใบส่งของ: หัวเอกสาร (thead) และช่องลงชื่อ (tfoot) อยู่ในตารางเดียวกับรายการสินค้า
-   WeasyPrint พิมพ์ thead/tfoot ซ้ำทุกหน้าให้เอง */
+/* ใบส่งของ: หัวเอกสาร (thead) อยู่ในตารางเดียวกับรายการสินค้า
+   WeasyPrint พิมพ์ thead ซ้ำทุกหน้าให้เอง */
 .items-table td.doc-wrap {{
     padding: 0;
     height: auto;
     border: 0.5pt solid #a0a0a0;
     vertical-align: top;
     overflow: visible;
-}}
-
-.items-table td.doc-wrap .signature-block {{
-    border-top: none;
 }}
 
 .col-no {{
@@ -533,7 +567,28 @@ def _build_html(
     return f"""<!DOCTYPE html>
 <html lang="th">
 <head><meta charset="utf-8" /><title>ใบส่งสินค้า</title></head>
-<body>
+<body class="delivery-note">
+<div class="doc-footer">
+  <table class="signature-block">
+    <tr>
+      <td class="sig-left">
+        <div class="signature-panel">
+          <span class="signature-title">ส่วนของลูกค้า / ผู้รับสินค้า</span>
+          <span class="sig-line">ลงชื่อ <span class="sig-field"></span></span>
+          <span class="sig-line sig-date">วันที่ <span class="sig-field"></span></span>
+        </div>
+      </td>
+      <td>
+        <div class="signature-panel">
+          <span class="signature-title">ส่วนของบริษัท / ผู้ส่งสินค้า</span>
+          <span class="sig-line">ลงชื่อ <span class="sig-field"></span></span>
+          <span class="sig-line sig-date">วันที่ <span class="sig-field"></span></span>
+        </div>
+      </td>
+    </tr>
+  </table>
+  <div class="page-no"></div>
+</div>
 <table class="items-table">
   <colgroup>{cols}</colgroup>
   <thead>
@@ -566,30 +621,6 @@ def _build_html(
       <th class="col-note">หมายเหตุ</th>
     </tr>
   </thead>
-  <tfoot>
-    <tr>
-      <td class="doc-wrap" colspan="{col_count}">
-        <table class="signature-block">
-          <tr>
-            <td class="sig-left">
-              <div class="signature-panel">
-                <span class="signature-title">ส่วนของลูกค้า / ผู้รับสินค้า</span>
-                <span class="sig-line">ลงชื่อ <span class="sig-field"></span></span>
-                <span class="sig-line sig-date">วันที่ <span class="sig-field"></span></span>
-              </div>
-            </td>
-            <td>
-              <div class="signature-panel">
-                <span class="signature-title">ส่วนของบริษัท / ผู้ส่งสินค้า</span>
-                <span class="sig-line">ลงชื่อ <span class="sig-field"></span></span>
-                <span class="sig-line sig-date">วันที่ <span class="sig-field"></span></span>
-              </div>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </tfoot>
   <tbody>{rows_html}{total_html}</tbody>
 </table>
 </body>
