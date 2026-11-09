@@ -60,13 +60,13 @@ def _render(n, opts, long_name=False):
     return [" ".join(_texts(p._page_box, [])) for p in _render_doc(n, opts, long_name).pages]
 
 
-def _render_doc(n, opts, long_name=False):
+def _render_doc(n, opts, long_name=False, status="confirmed"):
     items = [{"product_code": f"NE-{i:04d}", "product_name": LONG_NAME if long_name else f"สินค้า {i}",
               "quantity": 2, "unit": "ชิ้น", "note": "", "image_url": IMG, "wholesale_price": 10}
              for i in range(1, n + 1)]
     delivery = {"items": items, "customer_name": "ลูกค้าทดสอบ", "customer_address": "ที่อยู่ลูกค้า",
                 "delivery_number": "DO-TEST", "delivery_date": "2026-11-05", "notes": "-",
-                "status": "pending"}
+                "status": status}
     # ใช้ฟังก์ชันเดียวกับที่ endpoint ใช้ แล้วดักผลก่อนเขียน PDF เพื่ออ่านข้อความทีละหน้า
     captured = {}
     original = HTML.write_pdf
@@ -200,3 +200,13 @@ def test_grand_total_only_once_at_end():
 
 def test_single_page_still_one_page():
     assert len(_render(5, {"show_image": True})) == 1
+
+
+def test_draft_delivery_cannot_be_printed():
+    # ใบร่างยังไม่ตัดสต๊อก → ห้ามออกเอกสาร ต้องกดยืนยันส่งสินค้าก่อน
+    with pytest.raises(pg.DraftDeliveryError, match="ยืนยันส่งสินค้า"):
+        _render_doc(3, {"show_image": False}, status="draft")
+
+
+def test_confirmed_delivery_still_printable():
+    assert len(_render_doc(3, {"show_image": False}, status="confirmed").pages) == 1

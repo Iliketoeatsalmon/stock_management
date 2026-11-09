@@ -44,18 +44,22 @@ export default function DeliveryPrintPage() {
           fetch(`${API_URL}/deliveries/${id}/pdf?${query}`, { headers }),
           fetch(`${API_URL}/deliveries/${id}`, { headers }),
         ])
-        if (!deliveryRes.ok) throw new Error("Failed to load delivery")
+        if (!deliveryRes.ok) throw new Error("โหลดข้อมูลใบส่งของไม่สำเร็จ")
         const deliveryJson = await deliveryRes.json()
         if (active) {
           setDeliveryNumber(deliveryJson.delivery_number || "")
         }
         const res = pdfRes
-        if (!res.ok) throw new Error("Failed to load PDF")
+        if (!res.ok) {
+          // เช่น ใบที่ยังเป็น draft → backend บอกเหตุผลมาใน detail
+          const body = await res.json().catch(() => null)
+          throw new Error(body?.detail || "โหลด PDF ไม่สำเร็จ")
+        }
         const blob = await res.blob()
         objectUrl = URL.createObjectURL(blob)
         if (active) setPdfUrl(objectUrl)
       } catch (err) {
-        if (active) setError("Failed to load PDF")
+        if (active) setError(err instanceof Error && err.message ? err.message : "โหลด PDF ไม่สำเร็จ")
       }
     }
 

@@ -57,6 +57,7 @@ export default function DeliveryDetailPage() {
   }
 
   const handlePrint = () => {
+    if (isDraft) return // ใบร่างยังไม่ตัดสต๊อก ต้องยืนยันก่อนพิมพ์ (backend ก็ปฏิเสธเช่นกัน)
     window.open(withBasePath(`/deliveries/${params.id}/print`), "_blank")
   }
 
@@ -315,6 +316,9 @@ export default function DeliveryDetailPage() {
               กลับ
             </Link>
             <div className="flex gap-2 flex-wrap">
+              {isDraft && (
+                <span className="self-center text-xs text-amber-700">ยืนยันส่งสินค้าก่อนจึงพิมพ์ได้</span>
+              )}
               {(delivery.status === "draft" || currentRole === "admin") && (
                 <button
                   onClick={handleDelete}
@@ -326,7 +330,9 @@ export default function DeliveryDetailPage() {
               )}
               <button
                 onClick={handlePrint}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+                disabled={isDraft}
+                title={isDraft ? "ยืนยันส่งสินค้าก่อนจึงพิมพ์ได้" : undefined}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               >
                 <Printer className="w-4 h-4" />
                 พิมพ์
@@ -344,7 +350,16 @@ export default function DeliveryDetailPage() {
             </div>
           </div>
 
-          <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0 print:overflow-visible print:mx-0 print:px-0">
+          {isDraft && (
+            <div className="hidden print:block p-8 text-center text-base">
+              ใบส่งของนี้ยังเป็นร่าง (Draft) ต้องกดยืนยันส่งสินค้าก่อนจึงพิมพ์ได้
+            </div>
+          )}
+          <div
+            className={`overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0 print:overflow-visible print:mx-0 print:px-0 ${
+              isDraft ? "print:hidden" : ""
+            }`}
+          >
           <div className="page print-area bg-white rounded-xl border border-gray-200 p-4 sm:p-6 print:p-0 print:rounded-none print:border print:text-xs flex flex-col sm:min-h-[270mm] sm:min-w-[680px]">
             {/* Header */}
             <div className="border border-gray-400">

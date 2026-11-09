@@ -22,7 +22,7 @@ import zipfile
 import logging
 from logging.handlers import RotatingFileHandler
 
-from pdf_generator import generate_delivery_pdf, generate_delivery_report_pdf
+from pdf_generator import DraftDeliveryError, generate_delivery_pdf, generate_delivery_report_pdf
 from product_codes import next_product_code
 
 # Setup logging
@@ -2013,7 +2013,10 @@ def get_delivery_pdf(
         "price_field": price_col,
         "price_label": price_label,
     }
-    pdf_bytes = generate_delivery_pdf(delivery, company, options)
+    try:
+        pdf_bytes = generate_delivery_pdf(delivery, company, options)
+    except DraftDeliveryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     filename = f"delivery-{delivery_id}.pdf"
     headers = {"Content-Disposition": f"inline; filename={filename}"}
     return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)

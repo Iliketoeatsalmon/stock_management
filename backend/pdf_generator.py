@@ -15,6 +15,13 @@ FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "fonts", "NotoSans
 UPLOADS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "uploads"))
 
 
+class DraftDeliveryError(ValueError):
+    """ใบส่งของที่ยังเป็นร่าง (ยังไม่ตัดสต๊อก) ออกเอกสารไม่ได้"""
+
+
+DRAFT_PRINT_MESSAGE = "ใบส่งของนี้ยังเป็นร่าง (Draft) ต้องกดยืนยันส่งสินค้าก่อนจึงพิมพ์ได้"
+
+
 DEFAULT_DELIVERY_OPTIONS = {
     "show_image": True,
     "show_price": False,
@@ -28,6 +35,8 @@ def generate_delivery_pdf(
     company: Dict[str, Any],
     options: Optional[Dict[str, Any]] = None,
 ) -> bytes:
+    if delivery.get("status") == "draft":
+        raise DraftDeliveryError(DRAFT_PRINT_MESSAGE)
     opts = {**DEFAULT_DELIVERY_OPTIONS, **(options or {})}
     items = sorted(delivery.get("items", []) or [], key=_product_code_sort_key)
 
