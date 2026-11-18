@@ -124,7 +124,7 @@ export default function StockReportPage() {
                   <thead className="bg-gray-100">
                     <tr>
                       <th className="border border-gray-200 px-3 py-2 w-10">ลำดับ</th>
-                      <th className="border border-gray-200 px-3 py-2 w-20 print:hidden">รูป</th>
+                      <th className="border border-gray-200 px-3 py-2 w-20">รูป</th>
                       <th className="border border-gray-200 px-3 py-2">สินค้า</th>
                       <th className="border border-gray-200 px-3 py-2 text-right w-20">คงเหลือ</th>
                       <th className="border border-gray-200 px-3 py-2 text-right w-20">ขั้นต่ำ</th>
@@ -147,9 +147,9 @@ export default function StockReportPage() {
                       </tr>
                     ) : (
                       stockData.map((p, idx) => (
-                        <tr key={p.id} className="odd:bg-white even:bg-gray-50">
+                        <tr key={p.id} className="odd:bg-white even:bg-gray-50 break-inside-avoid">
                           <td className="border border-gray-200 px-3 py-2 text-center">{idx + 1}</td>
-                          <td className="border border-gray-200 px-3 py-2 print:hidden">
+                          <td className="border border-gray-200 px-3 py-2">
                             {p.image_url ? (
                               <img
                                 src={resolveUploadUrl(p.image_url || "")}
