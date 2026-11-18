@@ -1,11 +1,12 @@
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Header
+from fastapi.responses import StreamingResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker, Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 from typing import Optional, List
 from datetime import datetime, date, timedelta
@@ -13,22 +14,35 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from passlib.exc import UnknownHashError
 import os
-import shutil
 import uuid
 import io
+import csv
+import secrets
+import zipfile
 import logging
 from logging.handlers import RotatingFileHandler
 
-from pdf_generator import generate_delivery_pdf
+from pdf_generator import DraftDeliveryError, generate_delivery_pdf, generate_delivery_report_pdf
+from product_codes import next_product_code
 
 # Setup logging
-os.makedirs("/var/log/stock_management", exist_ok=True)
+# Log directory is configurable so the app also runs outside the Linux container
+# (e.g. Windows dev via run-backend.bat) where /var/log is not writable.
+LOG_DIR = os.environ.get("LOG_DIR", "/var/log/stock_management")
+try:
+    os.makedirs(LOG_DIR, exist_ok=True)
+except OSError:
+    # Fall back to a local ./logs folder if the configured path is not writable
+    LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
+    os.makedirs(LOG_DIR, exist_ok=True)
+
+LOG_FILE = os.path.join(LOG_DIR, "app.log")
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         RotatingFileHandler(
-            "/var/log/stock_management/app.log",
+            LOG_FILE,
             maxBytes=10485760,  # 10MB
             backupCount=5
         ),
@@ -43,6 +57,16 @@ class Settings(BaseSettings):
     secret_key: str = "your-super-secret-key-change-in-production"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 480
+    # ติ๊ก "จดจำการเข้าสู่ระบบ" ตอน login = ไม่ต้อง login ใหม่ภายในจำนวนวันนี้
+    remember_token_expire_days: int = 30
+
+    # API key ที่ระบบภายนอก (ERP) ใช้เรียก /api/catalog ผ่าน header X-API-Key
+    # ว่าง = ปิดการใช้งาน catalog API ทั้งหมด (ค่าเริ่มต้นปลอดภัย ไม่มี key ฝังในโค้ด)
+    erp_api_key: str = ""
+
+    # โดเมนที่อนุญาตให้เรียก API ข้าม origin คั่นด้วย comma
+    # "*" = เปิดหมด (ไม่แนะนำใน production)
+    cors_allow_origins: str = "*"
 
     class Config:
         env_file = ".env"
@@ -76,6 +100,76 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE IF EXISTS delivery_items ADD COLUMN IF NOT EXISTS note TEXT"))
     conn.execute(text("ALTER TABLE IF EXISTS users ALTER COLUMN email DROP NOT NULL"))
     conn.execute(text("ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS phone VARCHAR(30)"))
+    conn.execute(text("ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS notify_enabled BOOLEAN NOT NULL DEFAULT true"))
+    conn.execute(text("ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS cost_price DECIMAL(12,2) NOT NULL DEFAULT 0"))
+    conn.execute(text("ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS wholesale_price DECIMAL(12,2) NOT NULL DEFAULT 0"))
+    conn.execute(text("ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS retail_price DECIMAL(12,2) NOT NULL DEFAULT 0"))
+    # ระบบคืนของจากหน้างาน (รับกลับเข้าสต็อก)
+    # ไม่ใส่ FOREIGN KEY: ตารางเดิมในฐานข้อมูลที่ใช้งานจริงบางตัว (เช่น customers)
+    # ไม่มี unique constraint บน id ทำให้สร้าง FK ไม่ผ่านและ startup migration ล้มทั้งชุด
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS returns (
+            id SERIAL PRIMARY KEY,
+            return_number VARCHAR(50) UNIQUE NOT NULL,
+            customer_id INTEGER,
+            site_name VARCHAR(255),
+            return_date DATE NOT NULL,
+            notes TEXT,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS return_items (
+            id SERIAL PRIMARY KEY,
+            return_id INTEGER,
+            product_id INTEGER,
+            quantity INTEGER NOT NULL,
+            note TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_returns_date ON returns(return_date)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_return_items_return ON return_items(return_id)"))
+
+# ระบบหน่วยคู่ (เช่น 1 แกลลอน = 3.8 ลิตร)
+# สต็อกยังเก็บเป็นหน่วยเดิมของสินค้า (แกลลอน) ส่วนลิตรเป็นหน่วยที่กรอก/แสดงเพิ่ม
+# แยก engine.begin() ทีละคำสั่ง เพื่อไม่ให้คำสั่งเดียวที่พลาดทำ migration ล้มทั้งชุด
+UNIT_MIGRATION_STATEMENTS = [
+    # ลิตรต่อ 1 หน่วย: NULL = สินค้านี้ไม่มีการแปลงหน่วย (ทำงานเหมือนเดิม)
+    "ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS litre_per_unit DECIMAL(10,3)",
+    # จำนวนต้องรองรับทศนิยม เพราะจ่ายเป็นลิตรแล้วแปลงกลับเป็นแกลลอนได้เศษ
+    "ALTER TABLE IF EXISTS movements ALTER COLUMN quantity TYPE DECIMAL(12,4)",
+    "ALTER TABLE IF EXISTS delivery_items ALTER COLUMN quantity TYPE DECIMAL(12,4)",
+    "ALTER TABLE IF EXISTS purchase_items ALTER COLUMN quantity TYPE DECIMAL(12,4)",
+    "ALTER TABLE IF EXISTS return_items ALTER COLUMN quantity TYPE DECIMAL(12,4)",
+    # --- รองรับ catalog ของ ERP ---
+    # หมวดหมู่สินค้า (เดิมไม่มีเลย) ปล่อย NULL ได้ ค่อยทยอยกรอก
+    "ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS category VARCHAR(100)",
+    # แยกของใช้ซ้ำ (ต้องตามเก็บคืน) ออกจากของสิ้นเปลือง (ส่งแล้วจบ)
+    # ค่าเริ่มต้น CONSUMABLE เพราะของเดิมส่วนใหญ่เป็นของสิ้นเปลือง และ CSV export เดิมก็ fix ค่านี้อยู่แล้ว
+    "ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS item_kind VARCHAR(20) NOT NULL DEFAULT 'CONSUMABLE'",
+    # ธงบอกว่า customer แถวนี้คือ "ไซต์งาน" จริง ไม่ใช่ออฟฟิศตัวเองหรือชื่อบุคคล
+    "ALTER TABLE IF EXISTS customers ADD COLUMN IF NOT EXISTS is_site BOOLEAN NOT NULL DEFAULT false",
+    # รหัสสินค้าเดิมก่อนรันรหัสใหม่ (เติมค่าโดย sql/004_renumber_product_codes.sql)
+    # ใช้ค้นหาด้วยรหัสเดิมและให้ ERP จับคู่รหัสเก่า-ใหม่
+    "ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS legacy_code VARCHAR(50)",
+    # เก็บค่าที่ผู้ใช้กรอกจริงไว้ด้วย เพื่อให้เอกสารพิมพ์ตรงกับที่กรอก
+    "ALTER TABLE IF EXISTS delivery_items ADD COLUMN IF NOT EXISTS input_quantity DECIMAL(12,4)",
+    "ALTER TABLE IF EXISTS delivery_items ADD COLUMN IF NOT EXISTS input_unit VARCHAR(20)",
+    "ALTER TABLE IF EXISTS purchase_items ADD COLUMN IF NOT EXISTS input_quantity DECIMAL(12,4)",
+    "ALTER TABLE IF EXISTS purchase_items ADD COLUMN IF NOT EXISTS input_unit VARCHAR(20)",
+    "ALTER TABLE IF EXISTS return_items ADD COLUMN IF NOT EXISTS input_quantity DECIMAL(12,4)",
+    "ALTER TABLE IF EXISTS return_items ADD COLUMN IF NOT EXISTS input_unit VARCHAR(20)",
+]
+
+for _stmt in UNIT_MIGRATION_STATEMENTS:
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(_stmt))
+    except Exception as exc:  # noqa: BLE001 - best effort, must not block startup
+        logger.warning(f"Unit migration skipped: {_stmt} -> {exc}")
     # Ensure `customers.id` has a default sequence (fix when table was created without SERIAL default)
     try:
         # Ensure sequences/defaults for common tables with SERIAL-like ids
@@ -89,6 +183,8 @@ with engine.begin() as conn:
             "purchase_items",
             "movements",
             "users",
+            "returns",
+            "return_items",
         ]
         for t in tables:
             try:
@@ -151,9 +247,14 @@ def verify_password(plain_password, hashed_password):
 def get_password_hash(password):
     return pwd_context.hash(password)
 
-def create_access_token(data: dict):
+def create_access_token(data: dict, remember: bool = False):
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes)
+    lifetime = (
+        timedelta(days=settings.remember_token_expire_days)
+        if remember
+        else timedelta(minutes=settings.access_token_expire_minutes)
+    )
+    expire = datetime.utcnow() + lifetime
     # JWT spec requires subject to be a string; convert here to avoid jose JWTClaimsError
     if "sub" in to_encode:
         to_encode["sub"] = str(to_encode["sub"])
@@ -192,6 +293,7 @@ def normalize_optional_str(value: Optional[str]) -> Optional[str]:
 class LoginRequest(BaseModel):
     username: str
     password: str
+    remember: bool = False
 
 class UserCreate(BaseModel):
     username: str
@@ -222,12 +324,19 @@ class CompanySettingsUpdate(BaseModel):
     logo: Optional[str] = None
 
 class ProductCreate(BaseModel):
-    code: str
+    # ระบบสร้างรหัสให้เอง ค่าที่ client ส่งมาจะถูกละทิ้ง (เก็บ field ไว้ให้ client เก่ายังส่งได้ไม่ error)
+    code: Optional[str] = None
     name: str
     description: Optional[str] = None
     unit: str = "ชิ้น"
     min_stock: int = 0
     image_url: Optional[str] = None
+    cost_price: float = 0
+    wholesale_price: float = 0
+    retail_price: float = 0
+    litre_per_unit: Optional[float] = None
+    category: Optional[str] = None
+    item_kind: str = "CONSUMABLE"
 
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
@@ -236,6 +345,13 @@ class ProductUpdate(BaseModel):
     min_stock: Optional[int] = None
     is_active: Optional[bool] = None
     image_url: Optional[str] = None
+    notify_enabled: Optional[bool] = None
+    cost_price: Optional[float] = None
+    wholesale_price: Optional[float] = None
+    retail_price: Optional[float] = None
+    litre_per_unit: Optional[float] = None
+    category: Optional[str] = None
+    item_kind: Optional[str] = None
 
 class SupplierCreate(BaseModel):
     name: str
@@ -261,6 +377,8 @@ class CustomerCreate(BaseModel):
     email: Optional[str] = None
     address: Optional[str] = None
     tax_id: Optional[str] = None
+    # true = ถือเป็น "ไซต์งาน" (ตารางนี้ปนทั้งไซต์ ออฟฟิศตัวเอง และชื่อบุคคล)
+    is_site: bool = False
 
 class CustomerUpdate(BaseModel):
     name: Optional[str] = None
@@ -270,11 +388,15 @@ class CustomerUpdate(BaseModel):
     address: Optional[str] = None
     tax_id: Optional[str] = None
     is_active: Optional[bool] = None
+    is_site: Optional[bool] = None
 
 class PurchaseItemCreate(BaseModel):
     product_id: int
-    quantity: int
-    unit_price: float = 0
+    quantity: float = Field(gt=0)
+    unit_price: float = Field(default=0, ge=0)
+    # ค่าที่ผู้ใช้กรอกจริง (เช่น 5 ลิตร) เก็บไว้เพื่อพิมพ์ในเอกสารให้ตรงกับที่กรอก
+    input_quantity: Optional[float] = None
+    input_unit: Optional[str] = None
 
 class PurchaseCreate(BaseModel):
     invoice_number: str
@@ -286,8 +408,10 @@ class PurchaseCreate(BaseModel):
 
 class DeliveryItemCreate(BaseModel):
     product_id: int
-    quantity: int
+    quantity: float = Field(gt=0)
     note: Optional[str] = None
+    input_quantity: Optional[float] = None
+    input_unit: Optional[str] = None
 
 class DeliveryCreate(BaseModel):
     customer_id: int
@@ -303,8 +427,22 @@ class DeliveryUpdate(BaseModel):
 
 class ManualStockIn(BaseModel):
     product_id: int
-    quantity: int
+    quantity: float = Field(gt=0)
     notes: Optional[str] = None
+
+class ReturnItemCreate(BaseModel):
+    product_id: int
+    quantity: float = Field(gt=0)
+    note: Optional[str] = None
+    input_quantity: Optional[float] = None
+    input_unit: Optional[str] = None
+
+class ReturnCreate(BaseModel):
+    customer_id: Optional[int] = None
+    site_name: Optional[str] = None
+    return_date: date
+    notes: Optional[str] = None
+    items: List[ReturnItemCreate]
 
 # FastAPI App
 app = FastAPI(title="Stock Management API", version="1.0.0")
@@ -328,10 +466,16 @@ async def log_requests(request, call_next):
         logger.error(f"Request failed: {request.method} {request.url.path} - {str(e)}", exc_info=True)
         raise
 
+# จำกัด origin ตาม env (ตั้ง CORS_ALLOW_ORIGINS เป็นโดเมน ERP ใน production)
+_cors_origins = [o.strip() for o in settings.cors_allow_origins.split(",") if o.strip()] or ["*"]
+# allow_credentials ใช้กับ "*" ไม่ได้ตามสเปค CORS เบราว์เซอร์จะปฏิเสธ จึงปิดเมื่อเปิดกว้าง
+_cors_allow_credentials = "*" not in _cors_origins
+logger.info(f"CORS allow_origins={_cors_origins} allow_credentials={_cors_allow_credentials}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -357,7 +501,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     logger.info(f"Successful login for user: {request.username}")
-    token = create_access_token({"sub": user.id})
+    token = create_access_token({"sub": user.id}, remember=request.remember)
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -401,6 +545,7 @@ def get_dashboard(
             p.name,
             p.unit,
             p.min_stock,
+            p.notify_enabled,
             COALESCE(
                 SUM(
                     CASE
@@ -418,7 +563,8 @@ def get_dashboard(
             p.code,
             p.name,
             p.unit,
-            p.min_stock
+            p.min_stock,
+            p.notify_enabled
         HAVING COALESCE(
                 SUM(
                     CASE
@@ -432,6 +578,7 @@ def get_dashboard(
     """
     low_stock_rows = db.execute(text(low_stock_query)).fetchall()
     low_stock = [dict(row._mapping) for row in low_stock_rows]
+    low_stock_alert_count = sum(1 for row in low_stock if row["notify_enabled"])
 
     # movement ล่าสุด
     recent_movements_rows = db.execute(text("""
@@ -459,6 +606,7 @@ def get_dashboard(
     return {
         "total_products": total_products,
         "low_stock_count": len(low_stock),
+        "low_stock_alert_count": low_stock_alert_count,
         "low_stock_products": low_stock,
         "recent_movements": recent_movements,
         "total_customers": total_customers,
@@ -481,7 +629,15 @@ def get_products(
             p.unit,
             p.min_stock,
             p.image_url,
+            p.cost_price,
+            p.wholesale_price,
+            p.retail_price,
+            p.litre_per_unit,
+            p.category,
+            p.item_kind,
+            p.legacy_code,
             p.is_active,
+            p.notify_enabled,
             p.created_at,
             p.updated_at,
             COALESCE(
@@ -502,7 +658,7 @@ def get_products(
 
     if search:
         query += """
-            AND (p.name ILIKE :search OR p.code ILIKE :search)
+            AND (p.name ILIKE :search OR p.code ILIKE :search OR p.legacy_code ILIKE :search)
         """
         params["search"] = f"%{search}%"
 
@@ -515,7 +671,15 @@ def get_products(
             p.unit,
             p.min_stock,
             p.image_url,
+            p.cost_price,
+            p.wholesale_price,
+            p.retail_price,
+            p.litre_per_unit,
+            p.category,
+            p.item_kind,
+            p.legacy_code,
             p.is_active,
+            p.notify_enabled,
             p.created_at,
             p.updated_at
         ORDER BY p.name
@@ -523,6 +687,147 @@ def get_products(
 
     result = db.execute(text(query), params)
     return [dict(row._mapping) for row in result.fetchall()]
+
+# --- One-time migration export: product registry + qty on hand, as CSV -----
+# See README/task history for the full field contract. This is read-only:
+# it never writes to the old system's tables.
+EXPORT_FETCH_BATCH_SIZE = 500
+
+
+def _build_csv_bytes(header: List[str], rows: List[list]) -> bytes:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)  # default dialect: comma, CRLF, QUOTE_MINIMAL — matches the contract
+    writer.writerow(header)
+    writer.writerows(rows)
+    return (chr(0xFEFF) + buffer.getvalue()).encode("utf-8")
+
+
+@app.get("/api/products/export")
+def export_products_csv(db: Session = Depends(get_db), user = Depends(get_current_user)):
+    require_admin(user)
+
+    cutoff_date = datetime.now().strftime("%Y-%m-%d")
+
+    # Single read-only query: full registry (active + inactive) plus qty on hand,
+    # computed with the exact same formula used everywhere else in this app.
+    result = db.execute(text("""
+        SELECT
+            p.id,
+            p.code,
+            p.name,
+            p.unit,
+            p.description,
+            p.min_stock,
+            p.is_active,
+            COALESCE(
+                SUM(CASE WHEN m.movement_type = 'IN' THEN m.quantity ELSE -m.quantity END),
+                0
+            ) AS current_stock
+        FROM products p
+        LEFT JOIN movements m ON m.product_id = p.id
+        GROUP BY p.id, p.code, p.name, p.unit, p.description, p.min_stock, p.is_active
+        ORDER BY p.id
+    """))
+
+    # Fetch in batches rather than one giant fetchall() — the dedup/sort step
+    # below inherently needs the full set in memory regardless, but this avoids
+    # holding the raw DB cursor buffer and the Python row list in memory twice.
+    raw_rows = []
+    while True:
+        batch = result.fetchmany(EXPORT_FETCH_BATCH_SIZE)
+        if not batch:
+            break
+        raw_rows.extend(dict(row._mapping) for row in batch)
+
+    # Group by original code to find duplicates before assigning final codes.
+    by_code: dict = {}
+    for row in raw_rows:
+        code = (row["code"] or "").strip()
+        by_code.setdefault(code, []).append(row)
+
+    issues = []  # (source_id, code, name, issue)
+    final_rows = []
+
+    for code, group in by_code.items():
+        # Lowest id keeps the original code; later duplicates get renamed. This
+        # is deterministic across reruns (id never changes), unlike row order.
+        group.sort(key=lambda r: r["id"])
+        for idx, row in enumerate(group):
+            source_id = row["id"]
+            name = row["name"] or ""
+
+            if not code:
+                final_code = f"LEG-{source_id:06d}"
+                issues.append((source_id, final_code, name, "MISSING_CODE_GENERATED"))
+            elif len(group) > 1 and idx > 0:
+                final_code = f"{code}-{source_id}"
+                issues.append((source_id, final_code, name, "DUPLICATE_CODE_RENAMED"))
+            else:
+                final_code = code
+
+            unit = (row["unit"] or "").strip()
+            if not unit:
+                issues.append((source_id, final_code, name, "MISSING_UNIT"))
+
+            raw_qty = row["current_stock"] or 0
+            if raw_qty < 0:
+                qty_on_hand = 0
+                issues.append((source_id, final_code, name, "NEGATIVE_QTY"))
+            elif raw_qty == 0:
+                qty_on_hand = 0
+                issues.append((source_id, final_code, name, "ZERO_QTY"))
+            else:
+                qty_on_hand = raw_qty
+
+            # No unit_cost field exists anywhere in this system for products —
+            # always blank, never guessed/zero-filled, per the migration contract.
+            issues.append((source_id, final_code, name, "MISSING_COST"))
+
+            final_rows.append([
+                source_id,
+                final_code,
+                name,
+                unit,
+                "CONSUMABLE",
+                "",  # category — no source field
+                str(qty_on_hand),
+                "",  # unit_cost — always blank, see above
+                str(row["min_stock"] if row["min_stock"] is not None else 0),
+                "true" if row["is_active"] else "false",
+                (row["description"] or "").strip(),
+            ])
+
+    final_rows.sort(key=lambda r: r[1])  # sort by final code
+    issues.sort(key=lambda i: i[1])  # same order as the main file, for easy side-by-side review
+
+    main_csv = _build_csv_bytes(
+        ["source_id", "code", "name", "unit", "kind", "category", "qty_on_hand", "unit_cost", "reorder_point", "is_active", "note"],
+        final_rows,
+    )
+    issues_csv = _build_csv_bytes(
+        ["source_id", "code", "name", "issue"],
+        [[i[0], i[1], i[2], i[3]] for i in issues],
+    )
+
+    # date_time is fixed to the cutoff date (not wall-clock time) so re-running
+    # the export with unchanged data produces a byte-identical zip file.
+    fixed_date = (int(cutoff_date[0:4]), int(cutoff_date[5:7]), int(cutoff_date[8:10]), 0, 0, 0)
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for filename, content in [
+            (f"stock-export-{cutoff_date}.csv", main_csv),
+            (f"stock-export-{cutoff_date}-issues.csv", issues_csv),
+        ]:
+            info = zipfile.ZipInfo(filename, date_time=fixed_date)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, content)
+
+    zip_filename = f"stock-export-{cutoff_date}.zip"
+    return Response(
+        content=zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_filename}"'},
+    )
 
 @app.get("/api/products/{product_id}")
 def get_product(product_id: int, db: Session = Depends(get_db), user = Depends(get_current_user)):
@@ -539,15 +844,39 @@ def get_product(product_id: int, db: Session = Depends(get_db), user = Depends(g
         raise HTTPException(status_code=404, detail="Product not found")
     return dict(product._mapping)
 
+PRODUCT_CODE_MAX_ATTEMPTS = 5
+
+
 @app.post("/api/products")
 def create_product(product: ProductCreate, db: Session = Depends(get_db), user = Depends(get_current_user)):
-    result = db.execute(text("""
-        INSERT INTO products (code, name, description, unit, min_stock, image_url)
-        VALUES (:code, :name, :description, :unit, :min_stock, :image_url)
-        RETURNING *
-    """), product.model_dump())
-    db.commit()
-    return dict(result.fetchone()._mapping)
+    data = product.model_dump()
+
+    # รหัสสร้างโดยระบบเสมอ ไม่รับจาก client เพื่อไม่ให้เกิดรหัสซ้ำ/พิมพ์ผิดแบบที่เคยเป็น
+    # รหัสที่เคยใช้แล้ว (รวมสินค้าที่ปิดใช้งาน) จะไม่ถูกนำกลับมาใช้ เพราะเลขรันจาก MAX ของทุกแถว
+    for _ in range(PRODUCT_CODE_MAX_ATTEMPTS):
+        data["code"] = next_product_code(db)
+
+        # กันกรณีถูกสร้างพร้อมกันก่อนที่จะมี UNIQUE(code) ในฐานข้อมูล
+        taken = db.execute(
+            text("SELECT 1 FROM products WHERE TRIM(code) = :code"), {"code": data["code"]}
+        ).fetchone()
+        if taken:
+            continue
+
+        try:
+            result = db.execute(text("""
+                INSERT INTO products (code, name, description, unit, min_stock, image_url, cost_price, wholesale_price, retail_price, litre_per_unit, category, item_kind)
+                VALUES (:code, :name, :description, :unit, :min_stock, :image_url, :cost_price, :wholesale_price, :retail_price, :litre_per_unit, :category, :item_kind)
+                RETURNING *
+            """), data)
+            db.commit()
+        except IntegrityError:
+            # UNIQUE(code) ชนเพราะมีคนสร้างพร้อมกัน ลองเลขถัดไป
+            db.rollback()
+            continue
+        return dict(result.fetchone()._mapping)
+
+    raise HTTPException(status_code=503, detail="สร้างรหัสสินค้าไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
 
 @app.put("/api/products/{product_id}")
 def update_product(product_id: int, product: ProductUpdate, db: Session = Depends(get_db), user = Depends(get_current_user)):
@@ -580,10 +909,249 @@ def delete_product(product_id: int, db: Session = Depends(get_db), user = Depend
         raise HTTPException(status_code=404, detail="Product not found")
     return {"message": "Product deleted"}
 
+# ---------------------------------------------------------------------------
+# Catalog API สำหรับระบบภายนอก (ERP) — อ่านอย่างเดียว ยืนยันตัวตนด้วย X-API-Key
+# ---------------------------------------------------------------------------
+
+def require_api_key(x_api_key: Optional[str] = Header(default=None, alias="X-API-Key")):
+    """ตรวจ API key จาก env ถ้าไม่ได้ตั้ง ERP_API_KEY ไว้ = ปิดบริการนี้ทั้งหมด"""
+    expected = settings.erp_api_key
+    if not expected:
+        raise HTTPException(status_code=503, detail="Catalog API is not enabled")
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="Missing X-API-Key header")
+    # เทียบแบบ constant-time กัน timing attack
+    if not secrets.compare_digest(x_api_key, expected):
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    return True
+
+
+# คอลัมน์ที่เพิ่มทีหลัง อาจยังไม่มีถ้า migration ยังไม่ได้รัน
+# เช็คครั้งเดียวแล้วจำไว้ เพื่อให้ endpoint ใช้งานได้แม้ deploy โค้ดก่อน migration
+_column_cache: dict = {}
+
+
+def column_exists(db: Session, table: str, column: str) -> bool:
+    key = f"{table}.{column}"
+    if key not in _column_cache:
+        found = db.execute(text("""
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = :t AND column_name = :c
+        """), {"t": table, "c": column}).fetchone()
+        _column_cache[key] = found is not None
+    return _column_cache[key]
+
+
+from erp_reports import build_router as build_erp_reports_router  # noqa: E402
+
+app.include_router(build_erp_reports_router(get_db, require_api_key))
+
+CATALOG_MAX_LIMIT = 500
+
+
+@app.get("/api/catalog")
+def get_catalog(
+    updated_since: Optional[str] = None,
+    limit: int = 200,
+    offset: int = 0,
+    include_locations: bool = True,
+    include_inactive: bool = False,
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_api_key),
+):
+    """
+    ทะเบียนสินค้า + คงเหลือ + "ของอยู่ที่ไหน" สำหรับทำ catalog ฝั่ง ERP
+
+    ไม่คืน: cost_price, min_stock, notify_enabled และข้อมูลซัพพลายเออร์
+
+    หมายเหตุเรื่อง updated_since:
+        products.updated_at ขยับเฉพาะตอนแก้ "ทะเบียนสินค้า" ไม่ขยับตอนสต็อกเคลื่อนไหว
+        ถ้ากรอง updated_since จะได้เฉพาะสินค้าที่ข้อมูลทะเบียนเปลี่ยน ยอดคงเหลือของตัวอื่นจะตกหล่น
+        ข้อมูลมีแค่หลักร้อยแถว แนะนำให้ ERP ดึงทั้งหมดทุกรอบ (ไม่ส่ง updated_since)
+        ใช้ stock_as_of ที่คืนกลับไปเป็นเวลาอ้างอิงของยอดคงเหลือแทน
+    """
+    limit = max(1, min(limit, CATALOG_MAX_LIMIT))
+    offset = max(0, offset)
+
+    has_category = column_exists(db, "products", "category")
+    has_item_kind = column_exists(db, "products", "item_kind")
+    has_is_site = column_exists(db, "customers", "is_site")
+
+    has_legacy_code = column_exists(db, "products", "legacy_code")
+
+    category_sql = "p.category" if has_category else "NULL::varchar"
+    item_kind_sql = "p.item_kind" if has_item_kind else "'CONSUMABLE'::varchar"
+    legacy_code_sql = "p.legacy_code" if has_legacy_code else "NULL::varchar"
+
+    conditions = []
+    params: dict = {"limit": limit, "offset": offset}
+    if not include_inactive:
+        conditions.append("p.is_active = true")
+    if updated_since:
+        conditions.append("p.updated_at >= :updated_since")
+        params["updated_since"] = updated_since
+    where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    total = db.execute(
+        text(f"SELECT COUNT(*) FROM products p{where_clause}"),
+        {k: v for k, v in params.items() if k not in ("limit", "offset")},
+    ).scalar()
+
+    rows = db.execute(text(f"""
+        SELECT
+            p.id, p.code, {legacy_code_sql} AS legacy_code, p.name, p.description, p.unit,
+            {category_sql} AS category,
+            {item_kind_sql} AS item_kind,
+            p.image_url,
+            COALESCE(p.retail_price, 0)    AS retail_price,
+            COALESCE(p.wholesale_price, 0) AS wholesale_price,
+            p.litre_per_unit,
+            p.is_active, p.created_at, p.updated_at,
+            COALESCE(mv.current_stock, 0)  AS current_stock
+        FROM products p
+        LEFT JOIN (
+            SELECT product_id,
+                   SUM(CASE WHEN movement_type = 'IN' THEN quantity ELSE -quantity END) AS current_stock
+            FROM movements GROUP BY product_id
+        ) mv ON mv.product_id = p.id
+        {where_clause}
+        ORDER BY p.id
+        LIMIT :limit OFFSET :offset
+    """), params).fetchall()
+
+    items = []
+    for r in rows:
+        items.append({
+            "id": r.id,
+            "code": r.code,
+            # รหัสก่อนรันใหม่ (null สำหรับสินค้าที่สร้างหลังเปลี่ยนระบบรหัส) ใช้จับคู่ข้อมูลเก่า
+            "legacy_code": r.legacy_code,
+            "name": r.name,
+            "description": r.description or "",
+            "unit": r.unit,
+            "category": r.category,
+            "item_kind": r.item_kind,
+            "image_url": r.image_url or "",
+            "retail_price": float(r.retail_price or 0),
+            "wholesale_price": float(r.wholesale_price or 0),
+            "litre_per_unit": float(r.litre_per_unit) if r.litre_per_unit is not None else None,
+            "current_stock": float(r.current_stock or 0),
+            "is_active": bool(r.is_active),
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            "locations": [],
+        })
+
+    if include_locations and items:
+        by_id = {it["id"]: it for it in items}
+        site_flag_sql = "c.is_site" if has_is_site else "false"
+        loc_rows = db.execute(text(f"""
+            WITH sent AS (
+                SELECT d.customer_id, di.product_id, SUM(di.quantity) AS qty_sent
+                FROM delivery_items di
+                JOIN deliveries d ON d.id = di.delivery_id
+                WHERE d.status = 'confirmed'          -- ใบ draft ยังไม่ตัดสต็อก
+                  AND di.product_id = ANY(:ids)
+                GROUP BY d.customer_id, di.product_id
+            ),
+            ret AS (
+                SELECT rt.customer_id, ri.product_id, SUM(ri.quantity) AS qty_returned
+                FROM return_items ri
+                JOIN returns rt ON rt.id = ri.return_id
+                WHERE ri.product_id = ANY(:ids)
+                GROUP BY rt.customer_id, ri.product_id
+            )
+            SELECT
+                COALESCE(s.product_id, r.product_id)   AS product_id,
+                COALESCE(s.customer_id, r.customer_id) AS customer_id,
+                c.name                                 AS customer_name,
+                {site_flag_sql}                        AS is_site,
+                COALESCE(s.qty_sent, 0)                AS qty_sent,
+                COALESCE(r.qty_returned, 0)            AS qty_returned
+            FROM sent s
+            FULL JOIN ret r
+                ON r.product_id = s.product_id AND r.customer_id = s.customer_id
+            LEFT JOIN customers c ON c.id = COALESCE(s.customer_id, r.customer_id)
+            ORDER BY product_id, customer_id
+        """), {"ids": list(by_id.keys())}).fetchall()
+
+        for lr in loc_rows:
+            item = by_id.get(lr.product_id)
+            if not item:
+                continue
+            sent = float(lr.qty_sent or 0)
+            returned = float(lr.qty_returned or 0)
+            # คืนเกินยอดส่งเกิดขึ้นจริงในข้อมูล (ของที่ไซต์มีอยู่ก่อนใช้ระบบนี้)
+            # ตัดที่ 0 ไม่ให้ยอดค้างติดลบ
+            outstanding = max(sent - returned, 0.0)
+            if sent == 0 and returned == 0:
+                continue
+            item["locations"].append({
+                "customer_id": lr.customer_id,
+                "customer_name": lr.customer_name or "",
+                "is_site": bool(lr.is_site),
+                "qty_sent": sent,
+                "qty_returned": returned,
+                "qty_outstanding": outstanding,
+            })
+
+    return {
+        "stock_as_of": datetime.now().isoformat(),
+        "total": int(total or 0),
+        "limit": limit,
+        "offset": offset,
+        "returned": len(items),
+        "has_more": offset + len(items) < int(total or 0),
+        "schema": {
+            "has_category": has_category,
+            "has_item_kind": has_item_kind,
+            "has_is_site": has_is_site,
+            "has_legacy_code": has_legacy_code,
+        },
+        "notes": {
+            "qty_outstanding": (
+                "ยอดส่งสะสม - ยอดคืนสะสม ต่อ (สินค้า, ลูกค้า) ไม่ได้แปลว่าของยังอยู่ที่ไซต์ "
+                "ของสิ้นเปลือง (item_kind=CONSUMABLE) ที่ใช้หมดแล้วก็ยังนับอยู่ในนี้"
+            ),
+            "granularity": "ละเอียดระดับลูกค้า (customers) เท่านั้น ระบบนี้ไม่มีไซต์ย่อย",
+        },
+        "items": items,
+    }
+
+
+# ชนิดราคาที่เลือกแสดง/คิดมูลค่าได้ — whitelist ชื่อคอลัมน์ ห้ามรับค่าดิบจาก query ลง SQL
+PRICE_COLUMNS = {
+    "cost": "cost_price",
+    "wholesale": "wholesale_price",
+    "retail": "retail_price",
+}
+PRICE_LABELS = {
+    "cost": "ราคาทุน",
+    "wholesale": "ราคาส่ง",
+    "retail": "ราคาปลีก",
+}
+
+
+def resolve_price_column(price_type: Optional[str]) -> tuple:
+    key = (price_type or "cost").lower()
+    if key not in PRICE_COLUMNS:
+        key = "cost"
+    return key, PRICE_COLUMNS[key], PRICE_LABELS[key]
+
 # Reports
 @app.get("/api/reports/stock")
-def report_stock(db: Session = Depends(get_db), user = Depends(get_current_user)):
-    query = """
+def report_stock(
+    filter: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    filter_clause = ""
+    if filter == "available":
+        filter_clause = "AND COALESCE(s.current_stock, 0) > 0"
+    elif filter == "low":
+        filter_clause = "AND COALESCE(s.current_stock, 0) <= p.min_stock"
+
+    query = f"""
         SELECT
             p.*,
             COALESCE(s.current_stock, 0) AS current_stock
@@ -602,6 +1170,7 @@ def report_stock(db: Session = Depends(get_db), user = Depends(get_current_user)
         ) AS s
             ON p.id = s.product_id
         WHERE p.is_active = TRUE
+        {filter_clause}
         ORDER BY p.name;
     """
     result = db.execute(text(query))
@@ -648,15 +1217,142 @@ def report_purchases(
         "rows": [dict(r._mapping) for r in rows],
     }
 
+@app.get("/api/reports/deliveries")
+def report_deliveries(
+    customer_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    status: Optional[str] = "confirmed",
+    price_type: Optional[str] = "cost",
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    """สรุปสิ่งของที่ส่งให้แต่ละหน่วยงาน (ลูกค้า) รวมจำนวนต่อสินค้า"""
+    price_key, price_col, price_label = resolve_price_column(price_type)
+    conditions = ["1=1"]
+    params = {}
+    if customer_id:
+        conditions.append("d.customer_id = :customer_id")
+        params["customer_id"] = customer_id
+    if start_date:
+        conditions.append("d.delivery_date >= :start_date")
+        params["start_date"] = start_date
+    if end_date:
+        conditions.append("d.delivery_date <= :end_date")
+        params["end_date"] = end_date
+    if status:
+        conditions.append("d.status = :status")
+        params["status"] = status
+    where_clause = " AND ".join(conditions)
+
+    # จำนวนต่อสินค้า (รวมทุกใบส่งของในช่วง/หน่วยงานที่เลือก) + มูลค่าตามชนิดราคาที่เลือก
+    rows = db.execute(text(f"""
+        SELECT p.id AS product_id, p.code AS product_code, p.name AS product_name,
+               p.unit AS unit,
+               COALESCE(p.{price_col}, 0) AS unit_price,
+               SUM(di.quantity) AS total_quantity,
+               SUM(di.quantity * COALESCE(p.{price_col}, 0)) AS total_value,
+               COUNT(DISTINCT d.id) AS delivery_count
+        FROM delivery_items di
+        JOIN deliveries d ON di.delivery_id = d.id
+        JOIN products p ON di.product_id = p.id
+        WHERE {where_clause}
+        GROUP BY p.id, p.code, p.name, p.unit, p.{price_col}
+        ORDER BY p.name
+    """), params).fetchall()
+
+    totals = db.execute(text(f"""
+        SELECT COALESCE(SUM(di.quantity), 0) AS total_qty,
+               COALESCE(SUM(di.quantity * COALESCE(p.{price_col}, 0)), 0) AS total_val
+        FROM delivery_items di
+        JOIN deliveries d ON di.delivery_id = d.id
+        JOIN products p ON di.product_id = p.id
+        WHERE {where_clause}
+    """), params).fetchone()
+
+    delivery_count = db.execute(text(f"""
+        SELECT COUNT(DISTINCT d.id) AS cnt
+        FROM deliveries d
+        WHERE {where_clause}
+    """), params).scalar()
+
+    return {
+        "total_quantity": float(totals.total_qty or 0),
+        "total_value": float(totals.total_val or 0),
+        "delivery_count": int(delivery_count or 0),
+        "price_type": price_key,
+        "price_label": price_label,
+        "rows": [
+            {**dict(r._mapping),
+             "unit_price": float(r.unit_price or 0),
+             "total_quantity": float(r.total_quantity or 0),
+             "total_value": float(r.total_value or 0)}
+            for r in rows
+        ],
+    }
+
+@app.get("/api/reports/deliveries/pdf")
+def report_deliveries_pdf(
+    customer_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    status: Optional[str] = "confirmed",
+    price_type: Optional[str] = "cost",
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    report = report_deliveries(customer_id, start_date, end_date, status, price_type, db, user)
+    company = get_company_settings(db)
+
+    customer = None
+    if customer_id:
+        row = db.execute(text(
+            "SELECT name, address, phone, contact_person FROM customers WHERE id = :id"
+        ), {"id": customer_id}).fetchone()
+        if row:
+            customer = dict(row._mapping)
+
+    status_labels = {
+        "confirmed": "ยืนยันแล้ว (ส่งจริง)",
+        "draft": "ร่าง",
+        "cancelled": "ยกเลิก",
+    }
+    meta = {
+        "customer_name": customer["name"] if customer else "ทั้งหมด",
+        "customer_address": (customer.get("address") if customer else "") or "-",
+        "customer_contact": (customer.get("contact_person") if customer else "") or "-",
+        "customer_phone": (customer.get("phone") if customer else "") or "-",
+        "start_date": start_date or "-",
+        "end_date": end_date or "-",
+        "status_label": status_labels.get(status or "", "ทุกสถานะ"),
+        "printed_at": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "price_label": report.get("price_label", "ราคาทุน"),
+    }
+
+    pdf_bytes = generate_delivery_report_pdf(report, company, meta)
+    headers = {"Content-Disposition": "inline; filename=delivery-report.pdf"}
+    return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)
+
 # Image Upload
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
+
 @app.post("/api/upload-image")
-def upload_image(file: UploadFile = File(...)):
+def upload_image(file: UploadFile = File(...), user = Depends(get_current_user)):
     logger.info(f"Image upload: {file.filename}, size: {file.size if hasattr(file, 'size') else 'unknown'}")
-    ext = os.path.splitext(file.filename)[1].lower()
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+    # Read into memory so we can enforce a size limit before writing to disk
+    contents = file.file.read()
+    if len(contents) > MAX_IMAGE_SIZE:
+        raise HTTPException(status_code=400, detail="File too large (max 5MB)")
+
     filename = f"{uuid.uuid4().hex}{ext}"
     save_path = os.path.join("uploads", filename)
     with open(save_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(contents)
     logger.info(f"Image uploaded successfully: {filename}")
     return {"url": f"/uploads/{filename}"}
 
@@ -726,11 +1422,18 @@ def get_customers(db: Session = Depends(get_db), user = Depends(get_current_user
 
 @app.post("/api/customers")
 def create_customer(customer: CustomerCreate, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    ensure_table_id_sequence(db, "customers")
+    data = customer.model_dump()
+    data["name"] = data["name"].strip()
+    if not data["name"]:
+        raise HTTPException(status_code=400, detail="Name is required")
+    for key in ["contact_person", "phone", "email", "address", "tax_id"]:
+        data[key] = normalize_optional_str(data.get(key))
     result = db.execute(text("""
-        INSERT INTO customers (name, contact_person, phone, email, address, tax_id)
-        VALUES (:name, :contact_person, :phone, :email, :address, :tax_id)
+        INSERT INTO customers (name, contact_person, phone, email, address, tax_id, is_site)
+        VALUES (:name, :contact_person, :phone, :email, :address, :tax_id, :is_site)
         RETURNING *
-    """), customer.model_dump())
+    """), data)
     db.commit()
     return dict(result.fetchone()._mapping)
 
@@ -976,7 +1679,8 @@ def get_purchase_detail(purchase_id: int, db: Session = Depends(get_db), user = 
         raise HTTPException(status_code=404, detail="Purchase not found")
 
     items = db.execute(text("""
-        SELECT pi.*, pr.code AS product_code, pr.name AS product_name, pr.unit
+        SELECT pi.*, pr.code AS product_code, pr.name AS product_name, pr.unit,
+            pr.litre_per_unit
         FROM purchase_items pi
         JOIN products pr ON pi.product_id = pr.id
         WHERE pi.purchase_id = :id
@@ -1025,13 +1729,15 @@ def create_purchase(purchase: PurchaseCreate, db: Session = Depends(get_db), use
     total_amount = 0
     for item in purchase.items:
         db.execute(text("""
-            INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_price)
-            VALUES (:purchase_id, :product_id, :quantity, :unit_price)
+            INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_price, input_quantity, input_unit)
+            VALUES (:purchase_id, :product_id, :quantity, :unit_price, :input_quantity, :input_unit)
         """), {
             "purchase_id": purchase_id,
             "product_id": item.product_id,
             "quantity": item.quantity,
-            "unit_price": item.unit_price
+            "unit_price": item.unit_price,
+            "input_quantity": item.input_quantity,
+            "input_unit": normalize_optional_str(item.input_unit),
         })
         
         db.execute(text("""
@@ -1043,7 +1749,14 @@ def create_purchase(purchase: PurchaseCreate, db: Session = Depends(get_db), use
             "reference_id": purchase_id,
             "created_by": user.id
         })
-        
+
+        # ราคาที่รับเข้ามาให้กลายเป็นราคาทุนล่าสุดของสินค้า (แก้เองในหน้าสินค้าได้ภายหลัง)
+        # อัปเดตเฉพาะเมื่อกรอกราคามา (>0) จะได้ไม่ทับราคาทุนเดิมด้วยค่า 0
+        if item.unit_price and item.unit_price > 0:
+            db.execute(text("""
+                UPDATE products SET cost_price = :price, updated_at = :now WHERE id = :pid
+            """), {"price": item.unit_price, "now": datetime.now(), "pid": item.product_id})
+
         total_amount += item.quantity * item.unit_price
     
     db.execute(text("UPDATE purchases SET total_amount = :amount WHERE id = :id"), 
@@ -1067,6 +1780,153 @@ def manual_stock_in(data: ManualStockIn, db: Session = Depends(get_db), user = D
     })
     db.commit()
     return {"message": "Stock added successfully"}
+
+# Returns (คืนของจากหน้างาน -> รับกลับเข้าสต็อก)
+@app.get("/api/returns")
+def get_returns(
+    customer_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    conditions = ["1=1"]
+    params = {}
+    if customer_id:
+        conditions.append("r.customer_id = :customer_id")
+        params["customer_id"] = customer_id
+    if start_date:
+        conditions.append("r.return_date >= :start_date")
+        params["start_date"] = start_date
+    if end_date:
+        conditions.append("r.return_date <= :end_date")
+        params["end_date"] = end_date
+    where_clause = " AND ".join(conditions)
+
+    result = db.execute(text(f"""
+        SELECT r.*, c.name AS customer_name, u.full_name AS created_by_name,
+            COALESCE(ri_sum.total_qty, 0) AS total_qty,
+            COALESCE(ri_sum.item_count, 0) AS item_count
+        FROM returns r
+        LEFT JOIN customers c ON r.customer_id = c.id
+        LEFT JOIN users u ON r.created_by = u.id
+        LEFT JOIN (
+            SELECT return_id, SUM(quantity) AS total_qty, COUNT(*) AS item_count
+            FROM return_items
+            GROUP BY return_id
+        ) ri_sum ON ri_sum.return_id = r.id
+        WHERE {where_clause}
+        ORDER BY r.return_date DESC, r.id DESC
+    """), params)
+    return [dict(row._mapping) for row in result.fetchall()]
+
+@app.get("/api/returns/{return_id}")
+def get_return_detail(return_id: int, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    row = db.execute(text("""
+        SELECT r.*, c.name AS customer_name, u.full_name AS created_by_name
+        FROM returns r
+        LEFT JOIN customers c ON r.customer_id = c.id
+        LEFT JOIN users u ON r.created_by = u.id
+        WHERE r.id = :id
+    """), {"id": return_id}).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Return not found")
+
+    items = db.execute(text("""
+        SELECT ri.*, p.code AS product_code, p.name AS product_name, p.unit, p.image_url,
+            p.litre_per_unit
+        FROM return_items ri
+        JOIN products p ON ri.product_id = p.id
+        WHERE ri.return_id = :id
+        ORDER BY ri.id
+    """), {"id": return_id}).fetchall()
+
+    return {
+        "return": dict(row._mapping),
+        "items": [dict(i._mapping) for i in items],
+    }
+
+@app.post("/api/returns")
+def create_return(data: ReturnCreate, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    if not data.items:
+        raise HTTPException(status_code=400, detail="กรุณาเพิ่มรายการสินค้าที่คืนอย่างน้อย 1 รายการ")
+
+    site_name = normalize_optional_str(data.site_name)
+    if not data.customer_id and not site_name:
+        raise HTTPException(status_code=400, detail="กรุณาระบุหน่วยงานหรือชื่อไซต์ที่คืนของ")
+
+    today = datetime.now().strftime("%Y%m%d")
+    prefix = f"RT-{today}-"
+    # ใช้ MAX ของเลขท้าย (ไม่ใช่ COUNT) กันเลขซ้ำเมื่อมีการลบรายการเก่า
+    last_seq = db.execute(text("""
+        SELECT MAX(CAST(SUBSTRING(return_number FROM :start) AS INTEGER))
+        FROM returns
+        WHERE return_number LIKE :pattern
+    """), {"start": len(prefix) + 1, "pattern": f"{prefix}%"}).scalar()
+    return_number = f"{prefix}{str((last_seq or 0) + 1).zfill(4)}"
+
+    ensure_table_id_sequence(db, "returns")
+    ensure_table_id_sequence(db, "return_items")
+    ensure_table_id_sequence(db, "movements")
+
+    result = db.execute(text("""
+        INSERT INTO returns (return_number, customer_id, site_name, return_date, notes, created_by)
+        VALUES (:return_number, :customer_id, :site_name, :return_date, :notes, :created_by)
+        RETURNING *
+    """), {
+        "return_number": return_number,
+        "customer_id": data.customer_id,
+        "site_name": site_name,
+        "return_date": data.return_date,
+        "notes": normalize_optional_str(data.notes),
+        "created_by": user.id,
+    })
+    return_id = result.fetchone().id
+
+    for item in data.items:
+        db.execute(text("""
+            INSERT INTO return_items (return_id, product_id, quantity, note, input_quantity, input_unit)
+            VALUES (:return_id, :product_id, :quantity, :note, :input_quantity, :input_unit)
+        """), {
+            "return_id": return_id,
+            "product_id": item.product_id,
+            "quantity": item.quantity,
+            "note": normalize_optional_str(item.note),
+            "input_quantity": item.input_quantity,
+            "input_unit": normalize_optional_str(item.input_unit),
+        })
+        # คืนของ = รับกลับเข้าสต็อกทันที (movement ชนิด IN)
+        db.execute(text("""
+            INSERT INTO movements (product_id, movement_type, quantity, reference_type, reference_id, notes, created_by)
+            VALUES (:product_id, 'IN', :quantity, 'return', :reference_id, :notes, :created_by)
+        """), {
+            "product_id": item.product_id,
+            "quantity": item.quantity,
+            "reference_id": return_id,
+            "notes": f"คืนของ {return_number}",
+            "created_by": user.id,
+        })
+
+    db.commit()
+    logger.info(f"Return created: {return_number}, items={len(data.items)}")
+    return {"id": return_id, "return_number": return_number, "message": "Return created successfully"}
+
+@app.delete("/api/returns/{return_id}")
+def delete_return(return_id: int, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    require_admin(user)
+    row = db.execute(text("SELECT id FROM returns WHERE id = :id"), {"id": return_id}).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Return not found")
+    # ลบ movement ที่อ้างถึงใบคืนนี้ด้วย เพื่อให้ยอดสต็อกกลับไปเท่าเดิม
+    db.execute(
+        text("DELETE FROM movements WHERE reference_type = 'return' AND reference_id = :id"),
+        {"id": return_id},
+    )
+    # ลบรายการเองด้วย เพราะตารางสร้างแบบไม่มี FK/ON DELETE CASCADE
+    db.execute(text("DELETE FROM return_items WHERE return_id = :id"), {"id": return_id})
+    db.execute(text("DELETE FROM returns WHERE id = :id"), {"id": return_id})
+    db.commit()
+    return {"message": "Return deleted"}
 
 # Deliveries (Stock OUT)
 @app.get("/api/deliveries")
@@ -1120,7 +1980,11 @@ def get_delivery(delivery_id: int, db: Session = Depends(get_db), user = Depends
         raise HTTPException(status_code=404, detail="Delivery not found")
     
     items = db.execute(text("""
-        SELECT di.*, p.code as product_code, p.name as product_name, p.unit, p.image_url
+        SELECT di.*, p.code as product_code, p.name as product_name, p.unit, p.image_url,
+            p.litre_per_unit,
+            COALESCE(p.cost_price, 0) AS cost_price,
+            COALESCE(p.wholesale_price, 0) AS wholesale_price,
+            COALESCE(p.retail_price, 0) AS retail_price
         FROM delivery_items di
         JOIN products p ON di.product_id = p.id
         WHERE di.delivery_id = :id
@@ -1132,10 +1996,27 @@ def get_delivery(delivery_id: int, db: Session = Depends(get_db), user = Depends
     }
 
 @app.get("/api/deliveries/{delivery_id}/pdf")
-def get_delivery_pdf(delivery_id: int, db: Session = Depends(get_db), user = Depends(get_current_user)):
+def get_delivery_pdf(
+    delivery_id: int,
+    show_image: bool = True,
+    show_price: bool = False,
+    price_type: Optional[str] = "wholesale",
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user),
+):
     delivery = get_delivery(delivery_id, db, user)
     company = get_company_settings(db)
-    pdf_bytes = generate_delivery_pdf(delivery, company)
+    price_key, price_col, price_label = resolve_price_column(price_type)
+    options = {
+        "show_image": show_image,
+        "show_price": show_price,
+        "price_field": price_col,
+        "price_label": price_label,
+    }
+    try:
+        pdf_bytes = generate_delivery_pdf(delivery, company, options)
+    except DraftDeliveryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     filename = f"delivery-{delivery_id}.pdf"
     headers = {"Content-Disposition": f"inline; filename={filename}"}
     return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)
@@ -1143,10 +2024,15 @@ def get_delivery_pdf(delivery_id: int, db: Session = Depends(get_db), user = Dep
 @app.post("/api/deliveries")
 def create_delivery(delivery: DeliveryCreate, db: Session = Depends(get_db), user = Depends(get_current_user)):
     today = datetime.now().strftime("%Y%m%d")
-    count = db.execute(text(
-        "SELECT COUNT(*) FROM deliveries WHERE delivery_number LIKE :pattern"
-    ), {"pattern": f"DO-{today}%"}).scalar()
-    delivery_number = f"DO-{today}-{str(count + 1).zfill(4)}"
+    prefix = f"DO-{today}-"
+    # Use MAX of the numeric suffix (not COUNT) so deleting an older delivery
+    # cannot cause a new one to reuse an existing number and hit the UNIQUE constraint.
+    last_seq = db.execute(text("""
+        SELECT MAX(CAST(SUBSTRING(delivery_number FROM :start) AS INTEGER))
+        FROM deliveries
+        WHERE delivery_number LIKE :pattern
+    """), {"start": len(prefix) + 1, "pattern": f"{prefix}%"}).scalar()
+    delivery_number = f"{prefix}{str((last_seq or 0) + 1).zfill(4)}"
     
     # ensure id default/sequence exists for deliveries table (fix for missing SERIAL defaults)
     ensure_table_id_sequence(db, "deliveries")
@@ -1169,15 +2055,17 @@ def create_delivery(delivery: DeliveryCreate, db: Session = Depends(get_db), use
         # ensure delivery_items id default exists before inserting rows
         ensure_table_id_sequence(db, "delivery_items")
         db.execute(text("""
-            INSERT INTO delivery_items (delivery_id, product_id, quantity, note)
-            VALUES (:delivery_id, :product_id, :quantity, :note)
+            INSERT INTO delivery_items (delivery_id, product_id, quantity, note, input_quantity, input_unit)
+            VALUES (:delivery_id, :product_id, :quantity, :note, :input_quantity, :input_unit)
         """), {
             "delivery_id": delivery_id,
             "product_id": item.product_id,
             "quantity": item.quantity,
-            "note": item.note
+            "note": item.note,
+            "input_quantity": item.input_quantity,
+            "input_unit": normalize_optional_str(item.input_unit),
         })
-    
+
     db.commit()
     return {"id": delivery_id, "delivery_number": delivery_number, "message": "Delivery created"}
 
@@ -1209,13 +2097,15 @@ def update_delivery(delivery_id: int, data: DeliveryUpdate, db: Session = Depend
         db.execute(text("DELETE FROM delivery_items WHERE delivery_id = :id"), {"id": delivery_id})
         for item in data.items:
             db.execute(text("""
-                INSERT INTO delivery_items (delivery_id, product_id, quantity, note)
-                VALUES (:delivery_id, :product_id, :quantity, :note)
+                INSERT INTO delivery_items (delivery_id, product_id, quantity, note, input_quantity, input_unit)
+                VALUES (:delivery_id, :product_id, :quantity, :note, :input_quantity, :input_unit)
             """), {
                 "delivery_id": delivery_id,
                 "product_id": item.product_id,
                 "quantity": item.quantity,
-                "note": item.note
+                "note": item.note,
+                "input_quantity": item.input_quantity,
+                "input_unit": normalize_optional_str(item.input_unit),
             })
     db.commit()
     return {"message": "Delivery updated"}
@@ -1230,7 +2120,30 @@ def confirm_delivery(delivery_id: int, db: Session = Depends(get_db), user = Dep
         raise HTTPException(status_code=400, detail="Delivery already confirmed or cancelled")
     
     items = db.execute(text("SELECT * FROM delivery_items WHERE delivery_id = :id"), {"id": delivery_id}).fetchall()
-    
+
+    # Verify there is enough stock for every product before deducting anything,
+    # so a delivery cannot drive current_stock negative. Aggregate by product in
+    # case the same product appears on more than one line.
+    required_by_product = {}
+    for item in items:
+        required_by_product[item.product_id] = required_by_product.get(item.product_id, 0) + item.quantity
+
+    for product_id, required_qty in required_by_product.items():
+        current_stock = db.execute(text("""
+            SELECT COALESCE(SUM(CASE WHEN movement_type = 'IN' THEN quantity ELSE -quantity END), 0)
+            FROM movements WHERE product_id = :product_id
+        """), {"product_id": product_id}).scalar()
+        if required_qty > current_stock:
+            product = db.execute(
+                text("SELECT code, name FROM products WHERE id = :id"),
+                {"id": product_id},
+            ).fetchone()
+            product_label = f"{product.code} - {product.name}" if product else f"product {product_id}"
+            raise HTTPException(
+                status_code=400,
+                detail=f"สต๊อกไม่พอสำหรับ {product_label} (มี {current_stock}, ต้องการ {required_qty})",
+            )
+
     for item in items:
         db.execute(text("""
             INSERT INTO movements (product_id, movement_type, quantity, reference_type, reference_id, created_by)
@@ -1332,10 +2245,9 @@ def get_system_logs(
     require_admin(user)
 
     logs = []
-    log_dir = "/var/log/stock_management"
 
-    # Read application log file
-    app_log_path = os.path.join(log_dir, "app.log")
+    # Read application log file (same path used by the logging handler)
+    app_log_path = LOG_FILE
 
     try:
         if os.path.exists(app_log_path):

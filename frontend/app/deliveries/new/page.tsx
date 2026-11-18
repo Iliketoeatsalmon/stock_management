@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
@@ -9,10 +9,17 @@ import { api } from "@/lib/api"
 import { ArrowLeft, Plus, Trash2, Save } from "lucide-react"
 import Link from "next/link"
 import { DatePicker } from "@/components/ui/date-picker"
+import { ProductSelect } from "@/components/ui/product-select"
+import { QuantityInput } from "@/components/ui/quantity-input"
+import { formatStock, toBaseQuantity, unitOptions } from "@/lib/units"
+import { validateItemsAgainstStock } from "@/lib/stock"
 
 interface DeliveryItem {
   product_id: number
+  /** จำนวนตามหน่วยที่ผู้ใช้เลือกกรอก */
   quantity: number
+  /** หน่วยที่ผู้ใช้เลือกกรอก (ว่าง = หน่วยฐานของสินค้า) */
+  input_unit?: string
 }
 
 export default function NewDeliveryPage() {
@@ -53,14 +60,44 @@ export default function NewDeliveryPage() {
 
   const removeItem = (index: number) => setItems(items.filter((_, i) => i !== index))
 
+  // แปลงทุกบรรทัดเป็นหน่วยฐานก่อน เพราะสต็อกเก็บเป็นหน่วยฐาน (เช่น แกลลอน)
+  // ถ้าเทียบด้วยจำนวนลิตรที่กรอกตรง ๆ จะเช็คสต็อกผิด
+  const baseItems = useMemo(
+    () =>
+      items.map((item) => {
+        const product = products.find((p) => Number(p.id) === item.product_id)
+        const unit = item.input_unit || unitOptions(product)[0]
+        return {
+          product_id: item.product_id,
+          quantity: toBaseQuantity(Number(item.quantity) || 0, unit, product),
+          input_quantity: Number(item.quantity) || 0,
+          input_unit: unit,
+        }
+      }),
+    [items, products],
+  )
+
+  // Sum requested quantity per product so a warning still shows when the same
+  // product appears on more than one line (matches the backend's aggregate check).
+  const requiredByProduct = useMemo(() => {
+    const map = new Map<number, number>()
+    for (const item of baseItems) {
+      if (!item.product_id) continue
+      map.set(item.product_id, (map.get(item.product_id) || 0) + item.quantity)
+    }
+    return map
+  }, [baseItems])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (items.length === 0) { setError("กรุณาเพิ่มรายการสินค้า"); return }
     if (items.some((i) => i.product_id === 0)) { setError("กรุณาเลือกสินค้าให้ครบทุกบรรทัด"); return }
+    const stockError = validateItemsAgainstStock(baseItems, products)
+    if (stockError) { setError(stockError); return }
     setLoading(true)
     setError("")
     try {
-      const result = await api.post("/deliveries", { ...form, items: items.map(({ product_id, quantity }) => ({ product_id, quantity })) })
+      const result = await api.post("/deliveries", { ...form, items: baseItems })
       router.push(`/deliveries/${result.id}`)
     } catch (err: any) {
       setError(err.message || "เกิดข้อผิดพลาด")
@@ -72,7 +109,7 @@ export default function NewDeliveryPage() {
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar />
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         <Header title="สร้างใบส่งของ" />
         <main className="flex-1 p-4 sm:p-6">
           <Link href="/deliveries" className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 mb-5">
@@ -140,34 +177,33 @@ export default function NewDeliveryPage() {
                         <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
                           <div className="flex-1">
                             <label className="block text-xs text-gray-500 mb-1">สินค้า</label>
-                            <select
+                            <ProductSelect
+                              products={products}
                               value={item.product_id}
-                              onChange={(e) => updateItem(index, "product_id", Number.parseInt(e.target.value))}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm"
-                              required
-                            >
-                              <option value={0}>เลือกสินค้า</option>
-                              {products.map((p) => (
-                                <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
-                              ))}
-                            </select>
+                              onChange={(id) => updateItem(index, "product_id", id)}
+                              showStock
+                              className="text-sm"
+                            />
                           </div>
 
                           <div className="flex items-end gap-3">
-                            <div>
+                            <div className="w-48">
                               <label className="block text-xs text-gray-500 mb-1">
                                 คงเหลือ
-                                {product && <span className="ml-1 font-semibold text-blue-600">{product.current_stock} {product.unit}</span>}
+                                {product && (
+                                  <span className="ml-1 font-semibold text-blue-600">{formatStock(product.current_stock, product)}</span>
+                                )}
                               </label>
-                              <input
-                                type="number"
+                              <QuantityInput
                                 value={item.quantity}
-                                onChange={(e) => updateItem(index, "quantity", Number.parseInt(e.target.value) || 0)}
-                                className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-right text-sm bg-white"
-                                placeholder="จำนวน"
-                                min="1"
-                                max={product?.current_stock || 999}
-                                required
+                                unit={item.input_unit || unitOptions(product)[0]}
+                                product={product}
+                                onChange={({ quantity, unit }) => {
+                                  const next = [...items]
+                                  next[index] = { ...next[index], quantity, input_unit: unit }
+                                  setItems(next)
+                                }}
+                                className="text-sm"
                               />
                             </div>
                             <button
@@ -180,9 +216,9 @@ export default function NewDeliveryPage() {
                           </div>
                         </div>
 
-                        {/* Stock warning */}
-                        {product && item.quantity > product.current_stock && (
-                          <p className="text-xs text-red-500 mt-2">⚠ จำนวนเกินสต๊อกที่มี ({product.current_stock} {product.unit})</p>
+                        {/* Stock warning (aggregated across duplicate lines of the same product) */}
+                        {product && (requiredByProduct.get(pid) || 0) > product.current_stock && (
+                          <p className="text-xs text-red-500 mt-2">⚠ จำนวนรวมเกินสต๊อกที่มี ({formatStock(product.current_stock, product)})</p>
                         )}
                       </div>
                     )

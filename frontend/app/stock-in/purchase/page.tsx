@@ -10,11 +10,18 @@ import { api, API_URL, resolveUploadUrl } from "@/lib/api"
 import { ArrowLeft, Plus, Trash2, Save, Upload, X } from "lucide-react"
 import Link from "next/link"
 import { DatePicker } from "@/components/ui/date-picker"
+import { ProductSelect } from "@/components/ui/product-select"
+import { QuantityInput } from "@/components/ui/quantity-input"
+import { toBaseQuantity, unitOptions } from "@/lib/units"
+import { NumberInput } from "@/components/ui/number-input"
 
 interface PurchaseItem {
   product_id: number
   product_name?: string
+  /** จำนวนตามหน่วยที่ผู้ใช้เลือกกรอก */
   quantity: number
+  /** หน่วยที่ผู้ใช้เลือกกรอก (ว่าง = หน่วยฐานของสินค้า) */
+  input_unit?: string
   unit_price: number
 }
 
@@ -36,7 +43,6 @@ export default function PurchasePage() {
   const [attachments, setAttachments] = useState<{ file?: File; preview: string }[]>([])
   const [showProductModal, setShowProductModal] = useState(false)
   const [productForm, setProductForm] = useState({
-    code: "",
     name: "",
     unit: "ชิ้น",
     min_stock: 0,
@@ -116,7 +122,20 @@ export default function PurchasePage() {
         attachmentUrl = JSON.stringify(urls)
       }
 
-      await api.post("/purchases", { ...form, attachment_url: attachmentUrl, items })
+      // quantity ที่ส่งต้องเป็นหน่วยฐานของสินค้า ส่วนที่กรอกจริงเก็บใน input_*
+      // ราคา/หน่วย ผูกกับหน่วยฐานเสมอ (เช่น ราคาต่อแกลลอน) จึงไม่ต้องแปลง
+      const payloadItems = items.map((item) => {
+        const product = products.find((p) => Number(p.id) === Number(item.product_id))
+        const unit = item.input_unit || unitOptions(product)[0]
+        return {
+          product_id: item.product_id,
+          quantity: toBaseQuantity(Number(item.quantity) || 0, unit, product),
+          unit_price: item.unit_price,
+          input_quantity: Number(item.quantity) || 0,
+          input_unit: unit,
+        }
+      })
+      await api.post("/purchases", { ...form, attachment_url: attachmentUrl, items: payloadItems })
       router.push("/stock-in")
     } catch (err: any) {
       setError(err.message || "เกิดข้อผิดพลาด")
@@ -129,7 +148,7 @@ export default function PurchasePage() {
     <>
       <div className="flex min-h-screen bg-gray-50">
         <Sidebar />
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col min-w-0">
           <Header title="บันทึกบิลซื้อเข้า" />
 
           <main className="flex-1 p-4 sm:p-6">
@@ -260,45 +279,46 @@ export default function PurchasePage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
-                          {items.map((item, index) => (
+                          {items.map((item, index) => {
+                            const product = products.find((p) => Number(p.id) === Number(item.product_id))
+                            const unit = item.input_unit || unitOptions(product)[0]
+                            const baseQty = toBaseQuantity(Number(item.quantity) || 0, unit, product)
+                            return (
                             <tr key={index}>
                               <td className="px-4 py-2">
-                                <select
+                                <ProductSelect
+                                  products={products}
                                   value={item.product_id}
-                                  onChange={(e) => updateItem(index, "product_id", Number.parseInt(e.target.value))}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                                  required
-                                >
-                                  <option value={0}>เลือกสินค้า</option>
-                                  {products.map((p) => (
-                                    <option key={p.id} value={p.id}>
-                                      {p.code} - {p.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </td>
-                              <td className="px-4 py-2">
-                                <input
-                                  type="number"
-                                  value={item.quantity}
-                                  onChange={(e) => updateItem(index, "quantity", Number.parseInt(e.target.value) || 0)}
-                                  className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-right"
-                                  min="1"
-                                  required
+                                  onChange={(id) => updateItem(index, "product_id", id)}
+                                  showStock
                                 />
                               </td>
                               <td className="px-4 py-2">
-                                <input
-                                  type="number"
+                                <div className="w-40">
+                                  <QuantityInput
+                                    value={item.quantity}
+                                    unit={unit}
+                                    product={product}
+                                    onChange={({ quantity, unit: nextUnit }) => {
+                                      const next = [...items]
+                                      next[index] = { ...next[index], quantity, input_unit: nextUnit }
+                                      setItems(next)
+                                    }}
+                                  />
+                                </div>
+                              </td>
+                              <td className="px-4 py-2">
+                                <NumberInput
                                   value={item.unit_price}
-                                  onChange={(e) => updateItem(index, "unit_price", Number.parseFloat(e.target.value) || 0)}
+                                  onValueChange={(v) => updateItem(index, "unit_price", v)}
                                   className="w-32 px-3 py-2 border border-gray-300 rounded-lg text-right"
                                   min="0"
                                   step="0.01"
                                 />
+                                {product?.unit && <div className="text-xs text-gray-400 mt-1">ต่อ {product.unit}</div>}
                               </td>
                               <td className="px-4 py-2 text-right font-medium">
-                                {(item.quantity * item.unit_price).toLocaleString()}
+                                {(baseQty * item.unit_price).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                               </td>
                               <td className="px-4 py-2">
                                 <button
@@ -310,14 +330,19 @@ export default function PurchasePage() {
                                 </button>
                               </td>
                             </tr>
-                          ))}
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>
 
                     {/* Mobile cards */}
                     <div className="md:hidden space-y-3">
-                      {items.map((item, index) => (
+                      {items.map((item, index) => {
+                        const product = products.find((p) => Number(p.id) === Number(item.product_id))
+                        const unit = item.input_unit || unitOptions(product)[0]
+                        const baseQty = toBaseQuantity(Number(item.quantity) || 0, unit, product)
+                        return (
                         <div key={index} className="border border-gray-200 rounded-lg p-3 space-y-2">
                           <div className="flex items-start justify-between gap-2">
                             <span className="text-xs text-gray-500 mt-2">#{index + 1}</span>
@@ -329,37 +354,35 @@ export default function PurchasePage() {
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
-                          <select
+                          <ProductSelect
+                            products={products}
                             value={item.product_id}
-                            onChange={(e) => updateItem(index, "product_id", Number.parseInt(e.target.value))}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                            required
-                          >
-                            <option value={0}>เลือกสินค้า</option>
-                            {products.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.code} - {p.name}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(id) => updateItem(index, "product_id", id)}
+                            showStock
+                            className="text-sm"
+                          />
                           <div className="grid grid-cols-2 gap-2">
                             <div>
                               <label className="block text-xs text-gray-500 mb-1">จำนวน</label>
-                              <input
-                                type="number"
+                              <QuantityInput
                                 value={item.quantity}
-                                onChange={(e) => updateItem(index, "quantity", Number.parseInt(e.target.value) || 0)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-right text-sm"
-                                min="1"
-                                required
+                                unit={unit}
+                                product={product}
+                                onChange={({ quantity, unit: nextUnit }) => {
+                                  const next = [...items]
+                                  next[index] = { ...next[index], quantity, input_unit: nextUnit }
+                                  setItems(next)
+                                }}
+                                className="text-sm"
                               />
                             </div>
                             <div>
-                              <label className="block text-xs text-gray-500 mb-1">ราคา/หน่วย</label>
-                              <input
-                                type="number"
+                              <label className="block text-xs text-gray-500 mb-1">
+                                ราคา/{product?.unit || "หน่วย"}
+                              </label>
+                              <NumberInput
                                 value={item.unit_price}
-                                onChange={(e) => updateItem(index, "unit_price", Number.parseFloat(e.target.value) || 0)}
+                                onValueChange={(v) => updateItem(index, "unit_price", v)}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-right text-sm"
                                 min="0"
                                 step="0.01"
@@ -368,10 +391,13 @@ export default function PurchasePage() {
                           </div>
                           <div className="flex justify-between pt-2 border-t border-gray-100 text-sm">
                             <span className="text-gray-500">รวม</span>
-                            <span className="font-semibold text-gray-900">{(item.quantity * item.unit_price).toLocaleString()}</span>
+                            <span className="font-semibold text-gray-900">
+                              {(baseQty * item.unit_price).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                            </span>
                           </div>
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </>
                 )}
@@ -419,7 +445,7 @@ export default function PurchasePage() {
                   const productsData = await api.get("/products")
                   setProducts(productsData)
                   setShowProductModal(false)
-                  setProductForm({ code: "", name: "", unit: "ชิ้น", min_stock: 0, description: "", image_url: "" })
+                  setProductForm({ name: "", unit: "ชิ้น", min_stock: 0, description: "", image_url: "" })
                   setProductImageFile(null)
                   setProductImagePreview("")
                 } catch (err) {
@@ -430,13 +456,10 @@ export default function PurchasePage() {
             >
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-gray-700 mb-1">รหัสสินค้า *</label>
-                  <input
-                    value={productForm.code}
-                    onChange={(e) => setProductForm({ ...productForm, code: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                    required
-                  />
+                  <label className="block text-gray-700 mb-1">รหัสสินค้า</label>
+                  <div className="w-full px-3 py-2 border border-dashed border-gray-300 rounded-lg bg-gray-50 text-gray-500">
+                    สร้างให้อัตโนมัติ
+                  </div>
                 </div>
                 <div>
                   <label className="block text-gray-700 mb-1">หน่วย *</label>
@@ -493,11 +516,11 @@ export default function PurchasePage() {
               </div>
               <div>
                 <label className="block text-gray-700 mb-1">ขั้นต่ำ (เตือน)</label>
-                <input
-                  type="number"
+                <NumberInput
+                  integer
                   min={0}
                   value={productForm.min_stock}
-                  onChange={(e) => setProductForm({ ...productForm, min_stock: Number(e.target.value) || 0 })}
+                  onValueChange={(v) => setProductForm({ ...productForm, min_stock: v })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>

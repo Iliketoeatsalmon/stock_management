@@ -67,3 +67,5 @@ build/
 .cache/
 .temp/
 tmp/
+# ใบรับรอง Let's Encrypt (มี privkey.pem) ห้ามขึ้น git
+deploy/certbot/

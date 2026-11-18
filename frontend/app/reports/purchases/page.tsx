@@ -6,6 +6,7 @@ import { Header } from "@/components/layout/header"
 import { api } from "@/lib/api"
 import { FileText, Printer, RefreshCcw } from "lucide-react"
 import { DatePicker } from "@/components/ui/date-picker"
+import { ReportPrintHeader } from "@/components/reports/report-print-header"
 
 interface PurchaseRow {
   id: number
@@ -72,7 +73,7 @@ export default function PurchaseReportPage() {
       <div className="print:hidden">
         <Sidebar />
       </div>
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         <div className="print:hidden">
           <Header title="รายงานการซื้อ" />
         </div>
@@ -87,7 +88,17 @@ export default function PurchaseReportPage() {
           `}</style>
 
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm print:shadow-none print:border print:border-gray-300 print:mx-0">
-            <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200">
+            <div className="px-4 sm:px-6 print:px-0 print:pt-2">
+              <ReportPrintHeader
+                title="รายงานการซื้อ"
+                meta={`Supplier: ${
+                  purchaseFilter.supplier_id
+                    ? suppliers.find((s) => s.id === purchaseFilter.supplier_id)?.name || "-"
+                    : "ทั้งหมด"
+                } | ช่วง: ${purchaseFilter.start_date || "-"} ถึง ${purchaseFilter.end_date || "-"}`}
+              />
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 print:hidden">
               <div>
                 <h3 className="text-base sm:text-lg font-semibold text-gray-900">รายงานการซื้อ (ตาม Supplier)</h3>
                 <p className="text-xs sm:text-sm text-gray-600">เลือกช่วงเวลาและ Supplier</p>

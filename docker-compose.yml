@@ -29,12 +29,24 @@ services:
     environment:
       DATABASE_URL: postgresql://stockadmin:stockpass123@host.docker.internal:5432/stock_management
       SECRET_KEY: 655a63a2fdd5170c7f5b0825b8f813e16a80ef154f80f999b67a1e16eee10500
+      # --- ERP catalog sync ---
+      # อ่านจาก .env ข้างนอก ไม่ hardcode ค่าไว้ในไฟล์นี้
+      # ว่าง/ไม่ตั้ง = /api/catalog ตอบ 503 (ปิดบริการ) เป็นค่าเริ่มต้นที่ปลอดภัย
+      ERP_API_KEY: ${ERP_API_KEY:-}
+      # โดเมน ERP คั่นด้วย comma เช่น https://erp.example.com
+      # ไม่ตั้ง = "*" (พฤติกรรมเดิม) ควรตั้งใน production
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-*}
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
       - uploads_data:/app/uploads
       - logs_data:/var/log/stock_management
     restart: unless-stopped
+    networks:
+      - default
+      # เครือข่ายร่วมกับ ERP เพื่อให้ container ฝั่ง ERP เรียก http://stock_api:8000 ได้
+      # โดยไม่ต้องเปิดพอร์ตเพิ่มออกนอกเครื่อง
+      - erp_stock_link
 
   frontend:
     build:
@@ -51,6 +63,12 @@ services:
       backend:
         condition: service_started
     restart: unless-stopped
+
+networks:
+  # ต้องสร้างเครือข่ายนี้ก่อนครั้งเดียวด้วย:  docker network create erp_stock_link
+  # แล้วฝั่ง ERP ประกาศเป็น external เหมือนกัน จึงจะคุยกันได้
+  erp_stock_link:
+    external: true
 
 volumes:
   postgres_data:

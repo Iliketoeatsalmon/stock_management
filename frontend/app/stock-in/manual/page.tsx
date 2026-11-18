@@ -9,6 +9,10 @@ import { Header } from "@/components/layout/header"
 import { api, API_URL, resolveUploadUrl } from "@/lib/api"
 import { ArrowLeft, Save, Plus, Upload, X } from "lucide-react"
 import Link from "next/link"
+import { ProductSelect } from "@/components/ui/product-select"
+import { QuantityInput } from "@/components/ui/quantity-input"
+import { NumberInput } from "@/components/ui/number-input"
+import { formatQty, formatStock, toBaseQuantity, unitOptions } from "@/lib/units"
 
 export default function ManualStockInPage() {
   const router = useRouter()
@@ -18,7 +22,6 @@ export default function ManualStockInPage() {
   const [success, setSuccess] = useState("")
   const [showProductModal, setShowProductModal] = useState(false)
   const [productForm, setProductForm] = useState({
-    code: "",
     name: "",
     unit: "ชิ้น",
     min_stock: 0,
@@ -31,6 +34,7 @@ export default function ManualStockInPage() {
   const [form, setForm] = useState({
     product_id: 0,
     quantity: 1,
+    input_unit: "",
     notes: "",
   })
 
@@ -49,14 +53,27 @@ export default function ManualStockInPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
     setError("")
     setSuccess("")
 
+    if (!form.product_id) {
+      setError("กรุณาเลือกสินค้า")
+      return
+    }
+
+    setLoading(true)
     try {
-      await api.post("/stock/manual-in", form)
+      const product = products.find((p) => p.id === form.product_id)
+      const unit = form.input_unit || unitOptions(product)[0]
+      const baseQuantity = toBaseQuantity(Number(form.quantity), unit, product)
+      // manual-in ไม่มีตาราง item แยก จึงบันทึกหน่วยที่กรอกไว้ในหมายเหตุให้ตามรอยได้
+      const notes =
+        unit !== product?.unit
+          ? [form.notes, `(กรอก ${formatQty(form.quantity)} ${unit})`].filter(Boolean).join(" ")
+          : form.notes
+      await api.post("/stock/manual-in", { product_id: form.product_id, quantity: baseQuantity, notes })
       setSuccess("เพิ่มสต๊อกสำเร็จ")
-      setForm({ product_id: 0, quantity: 1, notes: "" })
+      setForm({ product_id: 0, quantity: 1, input_unit: "", notes: "" })
     } catch (err: any) {
       setError(err.message || "เกิดข้อผิดพลาด")
     } finally {
@@ -70,7 +87,7 @@ export default function ManualStockInPage() {
     <>
       <div className="flex min-h-screen bg-gray-50">
         <Sidebar />
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col min-w-0">
           <Header title="เพิ่มสต๊อก Manual" />
 
           <main className="flex-1 p-4 sm:p-6">
@@ -96,39 +113,32 @@ export default function ManualStockInPage() {
                         <Plus className="w-4 h-4" /> เพิ่มสินค้าใหม่
                       </button>
                     </div>
-                    <select
+                    <ProductSelect
+                      products={products}
                       value={form.product_id}
-                      onChange={(e) => setForm({ ...form, product_id: Number.parseInt(e.target.value) })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                      required
-                    >
-                      <option value={0}>เลือกสินค้า</option>
-                      {products.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.code} - {p.name}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(id) => setForm({ ...form, product_id: id })}
+                      showStock
+                      className="px-4"
+                    />
                   </div>
 
                   {selectedProduct && (
                     <div className="p-4 bg-gray-50 rounded-lg">
                       <p className="text-sm text-gray-500">คงเหลือปัจจุบัน</p>
                       <p className="text-2xl font-bold text-gray-900">
-                        {selectedProduct.current_stock} {selectedProduct.unit}
+                        {formatStock(selectedProduct.current_stock, selectedProduct)}
                       </p>
                     </div>
                   )}
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">จำนวนที่เพิ่ม *</label>
-                    <input
-                      type="number"
+                    <QuantityInput
                       value={form.quantity}
-                      onChange={(e) => setForm({ ...form, quantity: Number.parseInt(e.target.value) || 0 })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                      min="1"
-                      required
+                      unit={form.input_unit || unitOptions(selectedProduct)[0]}
+                      product={selectedProduct}
+                      onChange={({ quantity, unit }) => setForm({ ...form, quantity, input_unit: unit })}
+                      className="px-4"
                     />
                   </div>
 
@@ -183,10 +193,10 @@ export default function ManualStockInPage() {
                   setProducts(productsData)
                   setForm((prev) => ({ ...prev, product_id: created.id }))
                   setShowProductModal(false)
-                  setProductForm({ code: "", name: "", unit: "ชิ้น", min_stock: 0, description: "", image_url: "" })
+                  setProductForm({ name: "", unit: "ชิ้น", min_stock: 0, description: "", image_url: "" })
                   setProductImageFile(null)
                   setProductImagePreview("")
-                  setSuccess("เพิ่มสินค้าใหม่แล้ว")
+                  setSuccess(`เพิ่มสินค้าใหม่แล้ว รหัส ${created.code}`)
                 } catch (err) {
                   alert("เพิ่มสินค้าไม่สำเร็จ")
                 }
@@ -195,13 +205,10 @@ export default function ManualStockInPage() {
             >
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-gray-700 mb-1">รหัสสินค้า *</label>
-                  <input
-                    value={productForm.code}
-                    onChange={(e) => setProductForm({ ...productForm, code: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                    required
-                  />
+                  <label className="block text-gray-700 mb-1">รหัสสินค้า</label>
+                  <div className="w-full px-3 py-2 border border-dashed border-gray-300 rounded-lg bg-gray-50 text-gray-500">
+                    สร้างให้อัตโนมัติ
+                  </div>
                 </div>
                 <div>
                   <label className="block text-gray-700 mb-1">หน่วย *</label>
@@ -233,11 +240,11 @@ export default function ManualStockInPage() {
               </div>
               <div>
                 <label className="block text-gray-700 mb-1">ขั้นต่ำ (เตือน)</label>
-                <input
-                  type="number"
+                <NumberInput
+                  integer
                   min={0}
                   value={productForm.min_stock}
-                  onChange={(e) => setProductForm({ ...productForm, min_stock: Number(e.target.value) || 0 })}
+                  onValueChange={(v) => setProductForm({ ...productForm, min_stock: v })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>

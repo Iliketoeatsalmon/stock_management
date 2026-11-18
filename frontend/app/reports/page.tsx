@@ -3,13 +3,13 @@
 import Link from "next/link"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
-import { FileText, ShoppingBag } from "lucide-react"
+import { FileText, ShoppingBag, Truck } from "lucide-react"
 
 export default function ReportsHome() {
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar />
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         <Header title="รายงาน" />
         <main className="flex-1 p-4 sm:p-6">
           <div className="grid md:grid-cols-2 gap-6 max-w-3xl">
@@ -33,6 +33,17 @@ export default function ReportsHome() {
               </div>
               <h3 className="text-lg font-semibold text-gray-900">รายงานการซื้อ</h3>
               <p className="text-sm text-gray-600 mt-1">เลือก Supplier/ช่วงเวลา พร้อมยอดรวม และพิมพ์รายงาน</p>
+            </Link>
+
+            <Link
+              href="/reports/deliveries"
+              className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-lg transition-all group"
+            >
+              <div className="w-14 h-14 rounded-xl bg-purple-100 flex items-center justify-center mb-4 group-hover:bg-purple-600 transition-colors">
+                <Truck className="w-7 h-7 text-purple-600 group-hover:text-white" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">รายงานการส่งของ (ตามหน่วยงาน)</h3>
+              <p className="text-sm text-gray-600 mt-1">สรุปว่าหน่วยงานรับสิ่งของอะไรไปบ้าง รวมจำนวน และพิมพ์รายงาน</p>
             </Link>
           </div>
         </main>

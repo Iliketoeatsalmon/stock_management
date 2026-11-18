@@ -16,6 +16,7 @@ import {
   ChevronRight,
   X,
   Terminal,
+  Undo2,
 } from "lucide-react"
 
 const menuItems = [
@@ -23,6 +24,7 @@ const menuItems = [
   { href: "/products", icon: Package, label: "สินค้า" },
   { href: "/stock-in", icon: ArrowDownToLine, label: "รับเข้าสินค้า" },
   { href: "/deliveries", icon: Truck, label: "ใบส่งของ" },
+  { href: "/returns", icon: Undo2, label: "คืนของ" },
   { href: "/customers", icon: Building2, label: "ลูกค้า" },
   { href: "/suppliers", icon: Users, label: "Supplier" },
   { href: "/reports", icon: FileText, label: "รายงาน" },
